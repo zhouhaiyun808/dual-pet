@@ -1,0 +1,58 @@
+import "./styles.css";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { PetProfile } from "./types";
+import { WindowPet } from "./window-pet";
+
+const app = document.querySelector<HTMLDivElement>("#app")!;
+const label = getCurrentWindow().label as "pet-a" | "pet-b";
+
+const profiles: Record<"pet-a" | "pet-b", Omit<PetProfile, "scale">> = {
+  "pet-a": {
+    config: {
+      id: "pet-a",
+      name: "陈子奚",
+      partnerId: "pet-b",
+      emoji: "奚",
+      speedPxPerTick: 2.0,
+      frameMs: 100,
+      baseSize: 80
+    },
+    minScale: 0.55,
+    maxScale: 4
+  },
+  "pet-b": {
+    config: {
+      id: "pet-b",
+      name: "江晏",
+      partnerId: "pet-a",
+      emoji: "晏",
+      speedPxPerTick: 1.65,
+      frameMs: 250,
+      baseSize: 80
+    },
+    minScale: 0.55,
+    maxScale: 4
+  }
+};
+
+// Start both pets at the same small size on each launch.
+const profile: PetProfile = {
+  ...profiles[label],
+  scale: 1
+};
+
+app.innerHTML = `
+  <div class="pet-shell">
+    <div class="pet" id="pet">
+      <canvas id="pet-image" aria-label="${profile.config.name}"></canvas>
+      
+    </div>
+  </div>
+`;
+
+const pet = new WindowPet(profile);
+await pet.init().catch(error => { console.error(error);  });
+pet.start();
+
+
+

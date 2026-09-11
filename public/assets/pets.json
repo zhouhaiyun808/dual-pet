@@ -1,0 +1,24 @@
+{
+  "pet-a": {
+    "name": "陈子奚",
+    "source": "source-sheet.png",
+    "walkFramesPerDirection": 7,
+    "special": [
+      "sleep",
+      "kiss-left",
+      "kiss-right"
+    ],
+    "extra": "unused-extra"
+  },
+  "pet-b": {
+    "name": "江晏",
+    "source": "source-sheet.png",
+    "walkFramesPerDirection": 4,
+    "special": [
+      "sleep",
+      "kiss-left",
+      "kiss-right"
+    ],
+    "extra": "unused-extra"
+  }
+}
