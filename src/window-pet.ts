@@ -2,7 +2,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, Window, LogicalSize, PhysicalPosition, currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import type { Direction, PetProfile } from './types';
-import { getStaticFrame, getWalkFrames, loadSprite, type Sprite } from './assets';
+import { getBedFrame, getStaticFrame, getWalkFrames, loadSprite, type Sprite } from './assets';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 export class WindowPet {
   private win = getCurrentWindow();
@@ -13,6 +13,7 @@ export class WindowPet {
   private direction: Direction = 'down';
   private frame = 0;
   private sleeping = false;
+  private bedColor: 'green' | 'blue';
   private paired = false;
   private ownLeft = true;
   private busy = false;
@@ -26,12 +27,20 @@ export class WindowPet {
   private lastPaint = '';
   private referenceHeight = 1;
   constructor(private profile: PetProfile) {
+    this.bedColor = profile.config.id === 'pet-a' ? 'green' : 'blue';
     document.addEventListener('contextmenu', event => {
       event.preventDefault();
       void invoke('show_pet_menu', { paired: this.paired, sleeping: this.sleeping, ready: this.ready && !this.busy, scale: this.profile.scale }).catch(console.error);
     });
   }
   async init() {
+    await this.win.listen('pair-split', () => {
+      this.paired = false;
+      this.sleeping = false;
+      this.direction = 'down';
+      this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue';
+      void this.layout().catch(console.error);
+    });
     await listen<string>('pet-menu-action', event => { void this.menuAction(event.payload).catch(console.error); });
     const directions: Direction[] = ['up', 'down', 'left', 'right'];
     await Promise.all(directions.map(async d => {
@@ -40,6 +49,9 @@ export class WindowPet {
     }));
     await Promise.all(['pet-a', 'pet-b'].flatMap(id => ['sleep', 'kiss-left', 'kiss-right'].map(async name => {
       const url = getStaticFrame(id, name); this.sprites.set(url, await loadSprite(url));
+    })));
+    await Promise.all((['green', 'blue'] as const).flatMap(color => [false, true].map(async paired => {
+      const url = getBedFrame(color, paired); this.sprites.set(url, await loadSprite(url));
     })));
     this.referenceHeight = this.sprites.get(this.walks.get('down')![this.profile.config.id === 'pet-a' ? 2 : 0])!.height;
     await this.layout();
@@ -66,6 +78,10 @@ export class WindowPet {
   }
   private geometry() {
     const height = this.size();
+    if (this.sleeping) {
+      const bed = this.sprites.get(getBedFrame(this.paired ? this.bedColor : 'green', this.paired));
+      if (bed) return { width: Math.ceil(height * 1.45 * bed.width / bed.height), height: Math.ceil(height * 1.45) };
+    }
     if (!this.paired) return { width: height, height: Math.ceil(height * 1.1) };
     const [a, b] = this.pairSprites();
     return { width: Math.ceil(height * (a.width / a.height + b.width / b.height - .035)), height };
@@ -82,11 +98,11 @@ export class WindowPet {
   }
   private paint(now: number) {
     if (!this.walks.size) return;
-    const walking = this.pointer?.moved && now - this.lastMovement < 160;
+    const walking = !this.sleeping && this.pointer?.moved && now - this.lastMovement < 160;
     if (walking && now - this.lastFrame >= this.profile.config.frameMs) { this.frame++; this.lastFrame = now; }
     const frames = this.walks.get(this.direction)!;
     const url = this.sleeping ? getStaticFrame(this.profile.config.id, 'sleep') : frames[walking ? this.frame % frames.length : this.profile.config.id === 'pet-a' && this.direction === 'down' ? 2 : 0];
-    const key = `${this.paired}:${this.ownLeft}:${this.size()}:${url}`;
+    const key = `${this.paired}:${this.ownLeft}:${this.bedColor}:${this.size()}:${url}`;
     if (key === this.lastPaint) return;
     this.lastPaint = key;
     const { width, height } = this.geometry();
@@ -96,6 +112,31 @@ export class WindowPet {
     const ctx = this.canvas.getContext('2d')!;
     ctx.setTransform(dpi, 0, 0, dpi, 0, 0);
     ctx.clearRect(0, 0, width, height); ctx.imageSmoothingEnabled = false;
+    if (this.sleeping) {
+      const bed = this.sprites.get(getBedFrame(this.bedColor, this.paired));
+      if (!bed) return;
+      const reference = this.paired ? bed : this.sprites.get(getBedFrame('green', false))!;
+      const bedHeight = height, bedWidth = reference.width * bedHeight / reference.height;
+      const bedX = (width - bedWidth) / 2;
+      ctx.drawImage(bed.image, bed.x, bed.y, bed.width, bed.height, bedX, 0, bedWidth, bedHeight);
+      // The cream folded quilt begins just below the pillows in each bed sheet.
+      const quiltY = height * (this.bedColor === 'green' ? .35 : .32);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, width, quiltY);
+      ctx.clip();
+      const drawSleeper = (id: string, center: number) => {
+        const sleeper = this.sprites.get(getStaticFrame(id, 'sleep')); if (!sleeper) return;
+        // Keep the awake body scale; only the head above the quilt is visible.
+        const sleeperHeight = this.size(), sleeperWidth = sleeper.width * sleeperHeight / sleeper.height;
+        ctx.drawImage(sleeper.image, sleeper.x, sleeper.y, sleeper.width, sleeper.height,
+          center - sleeperWidth / 2, quiltY - sleeperHeight * .40, sleeperWidth, sleeperHeight);
+      };
+      if (this.paired) { drawSleeper('pet-a', bedX + bedWidth * .34); drawSleeper('pet-b', bedX + bedWidth * .66); }
+      else drawSleeper(this.profile.config.id, width / 2);
+      ctx.restore();
+      return;
+    }
     if (this.paired) {
       const [a, b] = this.pairSprites();
       const aw = a.width * height / a.height;
@@ -124,12 +165,27 @@ export class WindowPet {
       const [a, b, as, bs] = await Promise.all([this.win.outerPosition(), partner.outerPosition(), this.win.outerSize(), partner.outerSize()]);
       const dx = b.x + bs.width / 2 - a.x - as.width / 2;
       const dy = b.y + bs.height / 2 - a.y - as.height / 2;
-      if (Math.abs(dx) > (as.width + bs.width) * .30 || Math.abs(dy) > Math.min(as.height, bs.height) * .35) return;
+      // Sleeping beds join when their visible sides touch, excluding window padding.
+      const dpi = await this.win.scaleFactor();
+      const horizontalReach = this.sleeping ? (as.width + bs.width) / 2 - 24 * dpi : (as.width + bs.width) * .30;
+      if (Math.abs(dx) > horizontalReach || Math.abs(dy) > Math.min(as.height, bs.height) * .35) return;
       this.ownLeft = dx >= 0;
-      if (!await invoke<boolean>('join_pair')) return;
-      this.paired = true; this.sleeping = false;
+      const wasSleeping = this.sleeping;
+      const combinedSleeping = await invoke<boolean | null>('join_pair', { sleeping: wasSleeping });
+      // false is a successful awake pair; null means another join won or state changed.
+      if (combinedSleeping === null) return;
+      this.paired = true;
+      this.sleeping = combinedSleeping;
+      if (this.sleeping) {
+        const bedOwner = wasSleeping ? this.profile.config.id : this.profile.config.partnerId;
+        this.bedColor = bedOwner === 'pet-a' ? 'green' : 'blue';
+      }
       try { await this.layout(); }
-      catch (error) { this.paired = false; await invoke('split_pair', { x: b.x, y: b.y }); await this.layout(); throw error; }
+      catch (error) {
+        this.paired = false; this.sleeping = false;
+        this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue';
+        await invoke('split_pair', { x: b.x, y: b.y }); await this.layout(); throw error;
+      }
     } finally { this.busy = false; }
   }
   private async split() {
@@ -140,13 +196,23 @@ export class WindowPet {
       let x = pos.x + Math.round((this.size() + 48) * dpi), y = pos.y;
       if (monitor && otherSize) { x = clamp(x, monitor.position.x, Math.max(monitor.position.x, monitor.position.x + monitor.size.width - otherSize.width)); y = clamp(y, monitor.position.y, Math.max(monitor.position.y, monitor.position.y + monitor.size.height - otherSize.height)); }
       await invoke('split_pair', { x: Math.round(x), y: Math.round(y) });
-      this.paired = false; await this.layout();
+      this.paired = false; this.sleeping = false; this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue'; await this.layout();
     } finally { this.busy = false; }
   }
   private async menuAction(action: string) {
     if (action === 'quit') { await invoke('quit_pets'); return; }
     if (!this.ready || this.busy) return;
-    if (action === 'sleep' && !this.paired) { this.sleeping = !this.sleeping; this.paint(performance.now()); return; }
+    if (action === 'sleep') {
+      this.busy = true;
+      try {
+        const sleeping = !this.sleeping;
+        await invoke('set_sleeping', { sleeping });
+        this.sleeping = sleeping;
+        if (this.sleeping && this.paired) this.bedColor = Math.random() < .5 ? 'green' : 'blue';
+        await this.layout();
+      } finally { this.busy = false; }
+      return;
+    }
     if (action === 'split' && this.paired) { await this.split(); return; }
     if (['grow', 'shrink', 'reset'].includes(action)) {
       this.profile.scale = action === 'reset' ? 1 : clamp(this.profile.scale + (action === 'grow' ? .2 : -.2), this.profile.minScale, this.profile.maxScale);
@@ -167,7 +233,7 @@ export class WindowPet {
       const drag = this.pointer; if (!drag || !drag.dpi) return;
       const dx = event.screenX - drag.x, dy = event.screenY - drag.y;
       if (Math.hypot(dx, dy) < 3 && !drag.moved) return;
-      drag.moved = true; this.lastMovement = performance.now(); this.sleeping = false;
+      drag.moved = true; this.lastMovement = performance.now();
       { this.pet.classList.add('dragging'); this.direction = Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up'; this.queuePosition(new PhysicalPosition(Math.round(drag.originX + dx * drag.dpi), Math.round(drag.originY + dy * drag.dpi))); }
     });
     const end = async (event: PointerEvent) => {
@@ -180,7 +246,7 @@ export class WindowPet {
     for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) this.pet.addEventListener(name, event => { void end(event as PointerEvent).catch(console.error); });
     this.pet.addEventListener('dblclick', event => {
       if (this.paired) void this.split().catch(console.error);
-      else { this.sleeping = !this.sleeping; this.paint(performance.now()); }
+      else { void this.menuAction('sleep').catch(console.error); }
     });
   }
 }

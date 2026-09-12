@@ -4,8 +4,16 @@ const cache = new Map<string, Promise<Sprite>>();
 export function loadSprite(url: string): Promise<Sprite> {
   if (!cache.has(url)) cache.set(url, (async () => {
     const image = new Image(); image.src = url; await image.decode();
-    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const repairBluePost = url === getBedFrame('blue', false);
+    const canvas = document.createElement('canvas'); canvas.width = image.width + (repairBluePost ? 25 : 0); canvas.height = image.height;
     const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0);
+    if (repairBluePost) {
+      // Both exports share the same source scale and post baseline. The single
+      // export clipped its right post; reuse the intact double-bed post 1:1.
+      const reference = new Image(); reference.src = getBedFrame('blue', true); await reference.decode();
+      ctx.clearRect(395, 493, 60, 217);
+      ctx.drawImage(reference, 635, 493, 60, 217, 395, 493, 60, 217);
+    }
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height), pixels = data.data;
     // The exported silhouette has a one-source-pixel matte, including tinted edge pixels.
     // Trim only that outside contour, leaving all interior colors untouched.
@@ -46,6 +54,9 @@ export function loadSprite(url: string): Promise<Sprite> {
 export function getStaticFrame(id: string, name: string) {
   if (id === 'pet-b' && name.startsWith('kiss-')) name = name === 'kiss-left' ? 'kiss-right' : 'kiss-left';
   return `/assets/${id}/${name}.png`;
+}
+export function getBedFrame(color: 'green' | 'blue', paired: boolean) {
+  return `/assets/beds/${color}-${paired ? 'double' : 'single'}.png`;
 }
 export async function getWalkFrames(id: string, direction: Direction): Promise<string[]> {
   const frames = Array.from({ length: id === 'pet-a' ? 7 : 4 }, (_, i) => `/assets/${id}/walk-${direction}/${String(i + 1).padStart(2, '0')}.png`);
