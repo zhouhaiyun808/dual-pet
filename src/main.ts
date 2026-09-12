@@ -1,4 +1,5 @@
 import "./styles.css";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PetProfile } from "./types";
 import { WindowPet } from "./window-pet";
@@ -51,8 +52,25 @@ app.innerHTML = `
 `;
 
 const pet = new WindowPet(profile);
-await pet.init().catch(error => { console.error(error);  });
-pet.start();
+try {
+  await pet.init();
+  pet.start();
+  await invoke('report_pet_status', { status: `ready dpr=${window.devicePixelRatio} canvas=${document.querySelector('canvas')?.width}x${document.querySelector('canvas')?.height}` });
+} catch (error) {
+  console.error(error);
+  await invoke('report_pet_status', { status: `initialization failed: ${String(error)}` }).catch(console.error);
+  pet.destroy();
+  app.className = 'startup-error';
+  app.replaceChildren();
+  const message = document.createElement('p');
+  message.textContent = '桌宠加载失败，请退出后重新打开。';
+  const quit = document.createElement('button');
+  quit.textContent = '退出桌宠';
+  quit.addEventListener('click', () => { void invoke('quit_pets'); });
+  app.append(message, quit);
+  await getCurrentWindow().show().catch(console.error);
+}
+window.addEventListener('beforeunload', () => pet.destroy(), { once: true });
 
 
 
