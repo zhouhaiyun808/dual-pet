@@ -1,110 +1,69 @@
 # Agent Handoff
 
-## Purpose and architecture
+## 当前接手点：2026-09-13 双平台基线整合
 
-Dual Pet is a two-character Windows desktop pet built with Tauri 2, Rust, TypeScript, and Vite. Read `PROJECT_CONTEXT.md` for architecture and product decisions.
+- 项目：Dual Pet，Tauri 2 + Rust + TypeScript/Vite 双角色桌宠。
+- 当前整合分支：`codex/v0.3-baseline`。
+- 保留分支：`main` 为 Windows 一期历史基线，`mac-dev` 为 macOS 一期历史基线；两者均未被覆盖。
+- 整合目标：保持 Win/Mac 已验收表现不变，为定时睡眠、对话泡泡和养成玩法建立唯一后续基线。
+- macOS 首版目标 Intel / macOS 13.0+，实际验收记录见 `MACOS_TESTING.md`。
+- 用户已于 2026-09-13 确认 Mac 与 Windows 全部回归验证通过；阶段 0 完成。
 
-## Current checkpoint
+## 已完成的一期功能
 
-- Branch: `main`
-- Platform represented by `main`: Windows
-- Version: `0.2.0`
-- macOS branch: not created; create `macos` only when macOS work actually starts
+- 双透明桌宠窗口、拖动和四方向走路动画。
+- 缩放、恢复默认大小、单人睡醒。
+- 靠近亲亲、拆开，以及单人/双人床和混合睡醒合并规则。
+- Windows NSIS 与 macOS app/dmg 分平台构建。
+- macOS 菜单栏找回/退出、DPI 坐标、Control-click 和窗口恢复。
+- Windows 江晏左右素材映射修复，以及两名角色慢拖反向时按最近位移转向。
 
-## Completed
+## 双平台实现约定
 
-- Existing Windows application and assets are present.
-- Repository documentation and safe ignore rules are prepared for cross-computer synchronization.
-- Generated applications, installers, dependencies, caches, and Rust build output are intentionally excluded.
+- 共用 TypeScript 渲染、互动和状态逻辑；平台差异集中在 Tauri 平台配置与 macOS 条件代码。
+- `tauri.windows.conf.json` 使用 NSIS 和在线 WebView2 bootstrapper；已有 WebView2 时跳过下载。
+- `tauri.macos.conf.json` 使用 app/dmg、macOS 私有透明窗口能力和 ad-hoc 签名。
+- Mac 使用全局逻辑坐标处理窗口；Windows 使用物理坐标。
+- Mac 所在 Space 普通置顶，不跨所有 Space、不覆盖全屏；菜单栏可找回桌宠。
+- `npm test` 的模拟测试不能替代 Win/Mac 原生人工回归。
 
-## Verification
+## 必须保留的产品规则
 
-```powershell
-npm install
-npm run build
-npm run tauri:dev
-```
-
-Build an NSIS package with `npm run tauri:build`.
-
-## Known limitations
-
-- Windows 10/11 x64 is the only currently supported platform.
-- WebView2 Runtime is required on target Windows computers; the NSIS installer uses the online bootstrapper and downloads it only when missing.
-- Beds, sleeping drag, and automatic pairing are implemented; scheduled sleep is not.
-- 2026-09-12: frontend/Rust checks and NSIS build passed; user confirmed basic interactions passed manual testing.
-- Joining adopts the stationary pet's sleep state. When both sleep, bed color follows the dragged pet; when only the stationary pet sleeps, use its bed color. Splitting wakes both.
-- GitHub does not reproduce local application state, installed toolchains, Codex credentials, or full chat transcripts.
-
-## Mac 接手：2026-09-12
-
-### 交接状态
-
-- 已推送源码：`40ac355f1227821fb767bfa82b2622392f86ee57`，仓库 `https://github.com/zhouhaiyun808/dual-pet.git`，分支 `main`。
-- 用户确认 Windows 基础表现全部测试通过；这是 macOS 移植的基线。
-- 用户下一步要在 Mac 上开始开发 macOS 版。尚未创建 `macos` 分支，也尚未做 macOS 编译或运行验证。
-- GitHub Release **尚未发布**：上传命令被自动审批额度限制拦截，不能认为安装包已上传。准备使用标签 `v0.2.0`、目标提交 `40ac355`。
-- Windows 安装包仍在本地 `src-tauri/target/release/bundle/nsis/Dual Pet_0.2.0_x64-setup.exe`；程序在 `src-tauri/target/release/dual-pet.exe`。二者都不随 Git 同步。
-- Release note 草稿在 Windows 本地被忽略的 `tmp/release-v0.2.0.md`，Mac 可依据 CHANGELOG 重建。
-- 本次仅交接代码和仓库文档；未同步聊天记录，也未配置或操作聊天仓库。不要假定 Mac 能看到本对话。
-
-### 在 Mac 上开始
-
-1. 安装/确认 Git、Node.js/npm、Rust/Cargo 和 Xcode Command Line Tools；根据本机 CPU 选择 Rust 工具链。Windows 的已安装工具不会随仓库迁移。
-2. 登录有权访问该仓库的 GitHub 账号，将项目 clone 到自己选择的本地目录；Windows 路径 `C:\My Projects Codex\dual-pet` 不应写入 Mac 配置。
-
-```sh
-git clone https://github.com/zhouhaiyun808/dual-pet.git
-cd dual-pet
-git status --short
-git switch main
-git pull --ff-only
-git switch -c macos
-npm ci
-npm run build
-cargo check --manifest-path src-tauri/Cargo.toml
-npm run tauri:dev
-```
-
-如果目录或 `macos` 分支已存在，先检查其改动和远端，再切换已有分支；不要覆盖、强制重置或重复创建。`macos` 从更新后的稳定 `main` 开始，Windows 主线继续保留在 `main`。
-
-### 移植重点
-
-- `src/window-pet.ts`：Canvas 绘制、DPI/屏幕坐标、拖动、缩放、睡眠、窗口合并/拆开。
-- `src/assets.ts`：透明边缘清理、最大连通域、图片裁切；蓝色单人床右下柱在加载时使用双人床原图局部补齐。不要直接替换成图像生成的整床版本。
-- `src-tauri/src/lib.rs`：两个窗口共享的 PairState/SleepState、系统右键菜单、隐藏/显示伙伴窗口。
-- `src-tauri/tauri.conf.json` 与 `src-tauri/capabilities/default.json`：验证 macOS 透明窗口、无边框、置顶、隐藏任务栏、窗口事件和权限；需要的 macOS 专属配置应在移植时查验当前 Tauri 文档。
-- `package.json` 的 `tauri:build` 明确指定 `--bundles nsis`，当前配置也只打 NSIS。Mac 必须适配为 `.app`/`.dmg` 构建流程，不能直接沿用 Windows 打包命令。签名、公证、分发另行处理，不假定已配置 Apple 开发者账号。
-- 优先让开发版启动，再验证 Retina、多显示器工作区、拖动偏移、透明边缘、右键菜单、伙伴隐藏/显示以及 Spaces/全屏窗口行为。Windows 已通过不代表 Mac 已通过。
-
-### 必须保留的交互
-
-| 拖动者状态 | 另一人状态 | 合并结果 |
+| 拖动者 | 静止者 | 合并结果 |
 | --- | --- | --- |
 | 醒 | 醒 | 双人亲亲 |
 | 睡 | 睡 | 双人睡眠，床色跟随拖动者 |
-| 醒 | 睡 | 双人睡眠，床色跟随原来睡着的人 |
-| 睡 | 醒 | 两人醒来，双人亲亲 |
+| 醒 | 睡 | 双人睡眠，沿用静止者床色 |
+| 睡 | 醒 | 一起醒来亲亲 |
 
-- 陈子奚 `pet-a`：绿床；江晏 `pet-b`：蓝床。相同缩放比例下单人床同宽。
-- 单人/双人睡眠均能拖动，不自动唤醒；靠近松手时判断合并。
-- 人物头部露在枕头上，身体被被子遮挡，保留当前已通过测试的比例。
-- 拆开双人组合后，两人均醒来；不能恢复隐藏窗口之前的睡眠状态。
-- 组合右键进入睡眠时随机选双人床；这与拖动合床时按角色选色是两条不同规则。
-- 单人双击切换睡眠/醒来，双人双击拆开。定时睡眠未实现。
+- 陈子奚 `pet-a` 使用绿床，江晏 `pet-b` 使用蓝床；相同缩放下单人床同宽。
+- 单人/双人睡眠均可拖动，不自动唤醒；松手才判断合并。
+- 组合右键睡眠随机选床；拆开后两人都醒。
+- 单人双击睡醒，双人双击拆开。
+- 不更换现有素材；蓝色单人床右下柱的局部补齐保留于 `src/assets.ts`。
+- 当前启动时恢复默认大小与初始状态；定时睡眠和养成存档属于下一阶段。
 
-### 给 Mac 上新任务的提示
+## 验证命令
 
-> 阅读 AGENT_HANDOFF.md、PROJECT_CONTEXT.md、README.md、CHANGELOG.md、ROADMAP.md。以 main 中已测试的 Windows 基线为起点，在 macos 分支实现 macOS 版。先检查本机工具和分支状态，再适配 Tauri 窗口及打包配置，验证交接文档中的全部交互。当前 Windows 安装包未上传 Release；不要把 Windows 构建通过当成 Mac 验证通过。
+```sh
+npm ci
+npm run build
+npm test
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+```
 
-## External state
+macOS：`npm run tauri:dev`、`npm run tauri:build:mac`。
 
-- Packaged executables and installers remain local and are excluded from Git.
-- Personal Codex skills, including `hatch-pet`, remain outside the repository.
-- No macOS branch should exist yet.
+Windows：`npm run tauri:dev`、`npm run tauri:build:windows`。
 
-## Windows 朝向修复同步：2026-09-13
+## 下一阶段
 
-本次 main 仅同步江晏左右行走映射和两人的最近位移转向；Mac 移植继续保留在 mac-dev。原始素材、动画帧率、160ms 停步时间和 NSIS 配置保持不变。
+`codex/v0.3-baseline` 已通过双平台验收。按以下顺序推进 `v0.3`：公共状态与存档底座、定时睡眠、对话泡泡、轻量养成。新功能不要回填到 `main` 或 `mac-dev` 历史分支。
 
-已在 Mac 上运行 Windows 控制器模拟测试及 TypeScript/Vite 构建；未构建 Windows 安装包。Windows 端拉取 main 后运行 `npm ci`、`npm run build`、`npm run tauri:build`，并真机验证左右慢拖及反向。回归测试 `npm test` 使用 Node 24。
+## 分发与外部状态
+
+- Mac 首版仅 ad-hoc 签名自用，未配置 Developer ID、公证或公开 Release。
+- Windows 安装包应在 Windows 真机重新构建和验证。
+- 构建产物、凭据、Codex 数据库和本机运行状态不进入 Git。
+- GitHub Desktop 留下的本机 stash 未参与本次整合，不应删除或覆盖。

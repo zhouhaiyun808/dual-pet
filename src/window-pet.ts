@@ -1,9 +1,32 @@
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow, Window, LogicalSize, PhysicalPosition, currentMonitor, primaryMonitor } from '@tauri-apps/api/window';
+import { getCurrentWindow, Window, LogicalSize, LogicalPosition, PhysicalPosition, currentMonitor, primaryMonitor, availableMonitors, cursorPosition, type Monitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import type { Direction, PetProfile } from './types';
 import { getBedFrame, getStaticFrame, getWalkFrames, loadSprite, type Sprite } from './assets';
+import { bottomRightPosition, clampWindowPosition, cssDeltaToPhysical, normalizeRect, intersects, type PhysicalRect } from './window-geometry';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+type Drag = {
+  id: number;
+  screenX: number;
+  screenY: number;
+  originX: number;
+  originY: number;
+  cursorX: number;
+  cursorY: number;
+  dpi: number;
+  moved: boolean;
+  initialized: boolean;
+  positionRequest: number;
+  positionWork: Promise<void> | null;
+  primaryDpi: number;
+  ending: boolean;
+  lastMoveX: number;
+  lastMoveY: number;
+  startAccumX: number;
+  startAccumY: number;
+  directionAccumX: number;
+  directionAccumY: number;
+};
 export class WindowPet {
   private win = getCurrentWindow();
   private canvas = document.querySelector<HTMLCanvasElement>('#pet-image')!;
@@ -20,28 +43,49 @@ export class WindowPet {
   private ready = false;
   private lastFrame = 0;
   private lastMovement = 0;
-  private pointer: { id: number; x: number; y: number; originX: number; originY: number; dpi: number; moved: boolean; lastMoveX: number; lastMoveY: number; directionAccumX: number; directionAccumY: number } | null = null;
-  private pendingPosition: PhysicalPosition | null = null;
+  private pointer: Drag | null = null;
+  private pendingPosition: PhysicalPosition | LogicalPosition | null = null;
   private moving: Promise<void> | null = null;
   private layoutWork: Promise<void> = Promise.resolve();
   private lastPaint = '';
   private referenceHeight = 1;
+  private frameRequest: number | null = null;
+  private cleanups: Array<() => void> = [];
+  private tauriCleanups: Array<() => void> = [];
+  private recovering = false;
+  private displayCheck = false;
+  private monitorSignature = "";
+  private readonly macOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   constructor(private profile: PetProfile) {
     this.bedColor = profile.config.id === 'pet-a' ? 'green' : 'blue';
-    document.addEventListener('contextmenu', event => {
+    const contextMenu = (event: MouseEvent) => {
       event.preventDefault();
       void invoke('show_pet_menu', { paired: this.paired, sleeping: this.sleeping, ready: this.ready && !this.busy, scale: this.profile.scale }).catch(console.error);
-    });
+    };
+    document.addEventListener('contextmenu', contextMenu);
+    this.cleanups.push(() => document.removeEventListener('contextmenu', contextMenu));
+    const blockSelection = (event: Event) => {
+      event.preventDefault();
+      window.getSelection?.()?.removeAllRanges();
+    };
+    document.addEventListener('selectstart', blockSelection);
+    document.addEventListener('dragstart', blockSelection);
+    this.cleanups.push(() => document.removeEventListener('selectstart', blockSelection));
+    this.cleanups.push(() => document.removeEventListener('dragstart', blockSelection));
   }
   async init() {
-    await this.win.listen('pair-split', () => {
+    this.tauriCleanups.push(await this.win.listen('pair-split', () => {
       this.paired = false;
       this.sleeping = false;
       this.direction = 'down';
       this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue';
       void this.layout().catch(console.error);
-    });
-    await listen<string>('pet-menu-action', event => { void this.menuAction(event.payload).catch(console.error); });
+    }));
+    this.tauriCleanups.push(await listen<string>('pet-menu-action', event => { void this.menuAction(event.payload).catch(console.error); }));
+    // This event is intentionally targeted by the backend. It repairs a window
+    // without changing paired/sleeping/scale state.
+    this.tauriCleanups.push(await this.win.listen('pet-recover', () => { void this.recover().catch(console.error); }));
+    this.tauriCleanups.push(await this.win.listen('tauri://scale-change', () => { this.noteDisplayChange(); }));
     const directions: Direction[] = ['up', 'down', 'left', 'right'];
     await Promise.all(directions.map(async d => {
       const urls = await getWalkFrames(this.profile.config.id, d); this.walks.set(d, urls);
@@ -55,20 +99,24 @@ export class WindowPet {
     })));
     this.referenceHeight = this.sprites.get(this.walks.get('down')![this.profile.config.id === 'pet-a' ? 2 : 0])!.height;
     await this.layout();
-    const monitor = await primaryMonitor() ?? await currentMonitor();
-    if (monitor) {
-      const size = await this.win.outerSize();
-      const area = monitor.workArea;
-      const margin = Math.round(12 * monitor.scaleFactor);
-      const slot = this.profile.config.id === 'pet-a' ? 1 : 0;
-      await this.win.setPosition(new PhysicalPosition(
-        Math.max(area.position.x, area.position.x + area.size.width - margin - size.width - slot * size.width),
-        Math.max(area.position.y, area.position.y + area.size.height - margin - size.height)));
-    }
+    await this.placeAtHome();
     this.installEvents(); this.ready = true; this.paint(0);
+    // Keep startup deterministic on macOS: the native window is only exposed
+    // after its final logical size and physical position have been applied.
+    await this.win.show();
+    const displayTimer = window.setInterval(() => { void this.checkDisplays().catch(console.error); }, 3000);
+    this.cleanups.push(() => window.clearInterval(displayTimer));
   }
   start() {
-    const loop = (now: number) => { if (this.ready) this.paint(now); requestAnimationFrame(loop); }; requestAnimationFrame(loop);
+    if (this.frameRequest !== null) return;
+    const loop = (now: number) => { if (this.ready) this.paint(now); this.frameRequest = requestAnimationFrame(loop); };
+    this.frameRequest = requestAnimationFrame(loop);
+  }
+  stop() { if (this.frameRequest !== null) cancelAnimationFrame(this.frameRequest); this.frameRequest = null; }
+  destroy() {
+    this.stop();
+    for (const cleanup of this.cleanups.splice(0)) cleanup();
+    for (const cleanup of this.tauriCleanups.splice(0)) cleanup();
   }
   private size() { return Math.round(this.profile.config.baseSize * this.profile.scale); }
   private pairSprites(): [Sprite, Sprite] {
@@ -92,7 +140,8 @@ export class WindowPet {
       this.pet.style.setProperty('--pet-width', `${width}px`); this.pet.style.setProperty('--pet-size', `${height}px`);
       await this.win.setSize(new LogicalSize(width + 32, height + 56));
       this.lastPaint = ''; this.paint(performance.now());
-      localStorage.setItem(`pet-scale:${this.profile.config.id}`, String(this.profile.scale));
+      if (this.ready && !this.pointer) await this.keepInWorkArea();
+      try { localStorage.setItem(`pet-scale:${this.profile.config.id}`, String(this.profile.scale)); } catch (error) { console.error(error); }
     });
     return this.layoutWork;
   }
@@ -102,11 +151,11 @@ export class WindowPet {
     if (walking && now - this.lastFrame >= this.profile.config.frameMs) { this.frame++; this.lastFrame = now; }
     const frames = this.walks.get(this.direction)!;
     const url = this.sleeping ? getStaticFrame(this.profile.config.id, 'sleep') : frames[walking ? this.frame % frames.length : this.profile.config.id === 'pet-a' && this.direction === 'down' ? 2 : 0];
-    const key = `${this.paired}:${this.ownLeft}:${this.bedColor}:${this.size()}:${url}`;
+    const dpi = window.devicePixelRatio || 1;
+    const key = `${this.paired}:${this.ownLeft}:${this.bedColor}:${this.size()}:${dpi}:${url}`;
     if (key === this.lastPaint) return;
     this.lastPaint = key;
     const { width, height } = this.geometry();
-    const dpi = window.devicePixelRatio || 1;
     const backingWidth = Math.round(width * dpi), backingHeight = Math.round(height * dpi);
     if (this.canvas.width !== backingWidth || this.canvas.height !== backingHeight) { this.canvas.width = backingWidth; this.canvas.height = backingHeight; }
     const ctx = this.canvas.getContext('2d')!;
@@ -150,11 +199,72 @@ export class WindowPet {
         Math.round((width - drawWidth) / 2), height - drawHeight, drawWidth, drawHeight);
     }
   }
-  private queuePosition(position: PhysicalPosition) {
+  private queuePosition(position: PhysicalPosition | LogicalPosition) {
     this.pendingPosition = position;
     if (!this.moving) this.moving = (async () => {
       while (this.pendingPosition) { const p = this.pendingPosition; this.pendingPosition = null; await this.win.setPosition(p); }
-    })().catch(console.error).finally(() => { this.moving = null; });
+    })().catch(error => { this.pendingPosition = null; console.error(error); }).finally(() => { this.moving = null; });
+  }
+  // macOS uses a global logical desktop; Windows uses global physical pixels.
+  private async desktopGeometry(win: Window = this.win): Promise<PhysicalRect> {
+    const [position, size, dpi] = await Promise.all([win.outerPosition(), win.outerSize(), win.scaleFactor()]);
+    return normalizeRect({ position, size }, this.macOS ? dpi : 1);
+  }
+  private workArea(monitor: Monitor) {
+    return normalizeRect(monitor.workArea, this.macOS ? monitor.scaleFactor : 1);
+  }
+  private setDesktopPosition(position: { x: number; y: number }) {
+    return this.win.setPosition(this.macOS
+      ? new LogicalPosition(position.x, position.y)
+      : new PhysicalPosition(Math.round(position.x), Math.round(position.y)));
+  }
+  private async placeAtHome() {
+    const monitor = await primaryMonitor() ?? await currentMonitor();
+    if (!monitor) return;
+    const { size } = await this.desktopGeometry();
+    const margin = 12 * (this.macOS ? 1 : monitor.scaleFactor);
+    const slot = this.paired ? 0 : this.profile.config.id === 'pet-a' ? 1 : 0;
+    await this.setDesktopPosition(bottomRightPosition(this.workArea(monitor), size, margin, slot));
+  }
+  private async keepInWorkArea() {
+    if (this.pointer) return;
+    const monitor = await currentMonitor() ?? await primaryMonitor();
+    if (!monitor) return;
+    const { position, size } = await this.desktopGeometry();
+    const next = clampWindowPosition(position, size, this.workArea(monitor));
+    if (Math.abs(next.x - position.x) > .5 || Math.abs(next.y - position.y) > .5) await this.setDesktopPosition(next);
+  }
+  private async checkDisplays() {
+    if (!this.ready || this.pointer || this.busy || this.recovering || this.displayCheck) return;
+    this.displayCheck = true;
+    try {
+      if (!await this.win.isVisible()) return;
+      const monitors = await availableMonitors();
+      if (!monitors.length) return;
+      const signature = JSON.stringify(monitors.map(m => [m.position, m.workArea, m.scaleFactor]));
+      const changed = signature !== this.monitorSignature;
+      this.monitorSignature = signature;
+      const rect = await this.desktopGeometry();
+      if (!monitors.some(m => intersects(rect, this.workArea(m)))) await this.placeAtHome();
+      else if (changed) await this.keepInWorkArea();
+    } finally { this.displayCheck = false; }
+  }
+  private noteDisplayChange() {
+    if (!this.ready) return;
+    this.lastPaint = '';
+    this.paint(performance.now());
+    if (this.ready && !this.pointer) void this.keepInWorkArea().catch(console.error);
+  }
+  private async recover() {
+    if (!this.ready || this.recovering || this.busy || this.pointer) return;
+    this.recovering = true;
+    try {
+      await this.moving;
+      await this.layoutWork;
+      await this.placeAtHome();
+      this.lastPaint = '';
+      this.paint(performance.now());
+    } finally { this.recovering = false; }
   }
   private async tryJoin() {
     if (this.paired || this.busy) return;
@@ -162,13 +272,22 @@ export class WindowPet {
     try {
       const partner = await Window.getByLabel(this.profile.config.partnerId);
       if (!partner || !await partner.isVisible()) return;
-      const [a, b, as, bs] = await Promise.all([this.win.outerPosition(), partner.outerPosition(), this.win.outerSize(), partner.outerSize()]);
-      const dx = b.x + bs.width / 2 - a.x - as.width / 2;
-      const dy = b.y + bs.height / 2 - a.y - as.height / 2;
+      const [a, b, as, bs, adpi, bdpi] = await Promise.all([
+        this.win.outerPosition(), partner.outerPosition(), this.win.outerSize(), partner.outerSize(),
+        this.win.scaleFactor(), partner.scaleFactor(),
+      ]);
+      // tao reports macOS window geometry in each window's scale basis. Normalize
+      // both windows before comparing them, otherwise mixed-DPI monitors cannot
+      // be joined at their visible edges.
+      const ax = this.macOS ? a.x / adpi : a.x, ay = this.macOS ? a.y / adpi : a.y;
+      const bx = this.macOS ? b.x / bdpi : b.x, by = this.macOS ? b.y / bdpi : b.y;
+      const aw = this.macOS ? as.width / adpi : as.width, ah = this.macOS ? as.height / adpi : as.height;
+      const bw = this.macOS ? bs.width / bdpi : bs.width, bh = this.macOS ? bs.height / bdpi : bs.height;
+      const dx = bx + bw / 2 - ax - aw / 2;
+      const dy = by + bh / 2 - ay - ah / 2;
       // Sleeping beds join when their visible sides touch, excluding window padding.
-      const dpi = await this.win.scaleFactor();
-      const horizontalReach = this.sleeping ? (as.width + bs.width) / 2 - 24 * dpi : (as.width + bs.width) * .30;
-      if (Math.abs(dx) > horizontalReach || Math.abs(dy) > Math.min(as.height, bs.height) * .35) return;
+      const horizontalReach = this.sleeping ? (aw + bw) / 2 - (this.macOS ? 24 : 12 * (adpi + bdpi)) : (aw + bw) * .30;
+      if (Math.abs(dx) > horizontalReach || Math.abs(dy) > Math.min(ah, bh) * .35) return;
       this.ownLeft = dx >= 0;
       const wasSleeping = this.sleeping;
       const combinedSleeping = await invoke<boolean | null>('join_pair', { sleeping: wasSleeping });
@@ -182,82 +301,179 @@ export class WindowPet {
       }
       try { await this.layout(); }
       catch (error) {
+        // Keep the owner paired if native rollback fails; never expose a single
+        // frontend while Rust still owns a hidden partner.
+        await invoke('split_pair', { x: b.x, y: b.y });
         this.paired = false; this.sleeping = false;
         this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue';
-        await invoke('split_pair', { x: b.x, y: b.y }); await this.layout(); throw error;
+        await this.layout(); throw error;
       }
     } finally { this.busy = false; }
   }
   private async split() {
     if (this.busy) return; this.busy = true;
     try {
-      const pos = await this.win.outerPosition(); const dpi = await this.win.scaleFactor();
-      const monitor = await currentMonitor(); const other = await Window.getByLabel(this.profile.config.partnerId); const otherSize = await other?.outerSize();
-      let x = pos.x + Math.round((this.size() + 48) * dpi), y = pos.y;
-      if (monitor && otherSize) { x = clamp(x, monitor.position.x, Math.max(monitor.position.x, monitor.position.x + monitor.size.width - otherSize.width)); y = clamp(y, monitor.position.y, Math.max(monitor.position.y, monitor.position.y + monitor.size.height - otherSize.height)); }
+      const owner = await this.desktopGeometry();
+      const dpi = await this.win.scaleFactor();
+      const monitor = await currentMonitor() ?? await primaryMonitor();
+      const other = await Window.getByLabel(this.profile.config.partnerId);
+      if (!other) throw new Error('Partner window missing');
+      const guest = await this.desktopGeometry(other);
+      const otherDpi = await other.scaleFactor();
+      let next = { x: owner.position.x + (this.size() + 48) * (this.macOS ? 1 : dpi), y: owner.position.y };
+      if (monitor) next = clampWindowPosition(next, guest.size, this.workArea(monitor));
+      // The existing command takes guest physical coordinates, not owner pixels.
+      const x = next.x * (this.macOS ? otherDpi : 1), y = next.y * (this.macOS ? otherDpi : 1);
       await invoke('split_pair', { x: Math.round(x), y: Math.round(y) });
       this.paired = false; this.sleeping = false; this.bedColor = this.profile.config.id === 'pet-a' ? 'green' : 'blue'; await this.layout();
     } finally { this.busy = false; }
   }
   private async menuAction(action: string) {
     if (action === 'quit') { await invoke('quit_pets'); return; }
-    if (!this.ready || this.busy) return;
+    if (!this.ready || this.busy || this.recovering || this.pointer) return;
     if (action === 'sleep') {
       this.busy = true;
+      const previousSleeping = this.sleeping;
+      const previousBedColor = this.bedColor;
+      let backendChanged = false;
       try {
         const sleeping = !this.sleeping;
         await invoke('set_sleeping', { sleeping });
+        backendChanged = true;
         this.sleeping = sleeping;
         if (this.sleeping && this.paired) this.bedColor = Math.random() < .5 ? 'green' : 'blue';
         await this.layout();
+      } catch (error) {
+        this.sleeping = previousSleeping;
+        this.bedColor = previousBedColor;
+        if (backendChanged) await invoke('set_sleeping', { sleeping: previousSleeping }).catch(console.error);
+        await this.layout().catch(console.error);
+        throw error;
       } finally { this.busy = false; }
       return;
     }
     if (action === 'split' && this.paired) { await this.split(); return; }
     if (['grow', 'shrink', 'reset'].includes(action)) {
-      this.profile.scale = action === 'reset' ? 1 : clamp(this.profile.scale + (action === 'grow' ? .2 : -.2), this.profile.minScale, this.profile.maxScale);
-      await this.layout();
+      this.busy = true;
+      const previousScale = this.profile.scale;
+      try {
+        this.profile.scale = action === 'reset' ? 1 : clamp(this.profile.scale + (action === 'grow' ? .2 : -.2), this.profile.minScale, this.profile.maxScale);
+        await this.layout();
+      } catch (error) {
+        this.profile.scale = previousScale;
+        await this.layout().catch(console.error);
+        throw error;
+      } finally { this.busy = false; }
     }
   }
   private installEvents() {
-    this.pet.addEventListener('pointerdown', async event => {
-      if (event.button !== 0 || this.busy || this.pointer) return;
-      this.pet.setPointerCapture(event.pointerId);
+    const onPointerDown = async (event: PointerEvent) => {
+      // macOS synthesizes Control-click as a primary-button event. Let the
+      // contextmenu handler own it instead of starting a drag.
+      if (event.button !== 0 || (this.macOS && (event.ctrlKey || event.metaKey)) || this.busy || this.recovering || this.pointer) return;
+      event.preventDefault();
+      try { this.pet.setPointerCapture(event.pointerId); } catch (error) { console.error(error); return; }
       // Register immediately so a quick release cannot leave a stale drag after awaiting window information.
-      const drag = { id: event.pointerId, x: event.screenX, y: event.screenY, originX: 0, originY: 0, dpi: 0, moved: false, lastMoveX: event.screenX, lastMoveY: event.screenY, directionAccumX: 0, directionAccumY: 0 };
+      const drag: Drag = {
+        id: event.pointerId, screenX: event.screenX, screenY: event.screenY,
+        originX: 0, originY: 0, cursorX: 0, cursorY: 0, dpi: 0,
+        moved: false, initialized: false, positionRequest: 0, positionWork: null,
+        primaryDpi: 1, ending: false,
+        lastMoveX: event.screenX, lastMoveY: event.screenY,
+        startAccumX: 0, startAccumY: 0, directionAccumX: 0, directionAccumY: 0,
+      };
       this.pointer = drag;
-      try { const [pos, dpi] = await Promise.all([this.win.outerPosition(), this.win.scaleFactor()]); drag.originX = pos.x; drag.originY = pos.y; drag.dpi = dpi; }
-      catch (error) { this.pointer = null; console.error(error); }
-    });
-    this.pet.addEventListener('pointermove', event => {
-      const drag = this.pointer; if (!drag || !drag.dpi) return;
+      try {
+        const [pos, cursor, dpi, primary] = await Promise.all([
+          this.win.outerPosition(), cursorPosition(), this.win.scaleFactor(), this.macOS ? primaryMonitor() : Promise.resolve(null),
+        ]);
+        if (this.pointer !== drag) return;
+        drag.dpi = dpi;
+        drag.primaryDpi = primary?.scaleFactor ?? dpi;
+        if (this.macOS) {
+          drag.originX = pos.x / dpi; drag.originY = pos.y / dpi;
+          drag.cursorX = cursor.x / drag.primaryDpi; drag.cursorY = cursor.y / drag.primaryDpi;
+        } else {
+          drag.originX = pos.x; drag.originY = pos.y;
+          drag.cursorX = cursor.x; drag.cursorY = cursor.y;
+        }
+        drag.initialized = true;
+      } catch (error) {
+        if (this.pointer === drag) this.pointer = null;
+        if (this.pet.hasPointerCapture(event.pointerId)) this.pet.releasePointerCapture(event.pointerId);
+        console.error(error);
+      }
+    };
+    const updateDrag = async (drag: Drag, event: PointerEvent, request: number) => {
+      try {
+        const cursor = await cursorPosition();
+        if (this.pointer !== drag || request !== drag.positionRequest) return;
+        const cursorX = this.macOS ? cursor.x / drag.primaryDpi : cursor.x;
+        const cursorY = this.macOS ? cursor.y / drag.primaryDpi : cursor.y;
+        const nextX = drag.originX + cursorX - drag.cursorX;
+        const nextY = drag.originY + cursorY - drag.cursorY;
+        this.queuePosition(this.macOS
+          ? new LogicalPosition(Math.round(nextX), Math.round(nextY))
+          : new PhysicalPosition(Math.round(nextX), Math.round(nextY)));
+      } catch (error) {
+        // Keep dragging usable if the platform cursor query is temporarily
+        // unavailable; this fallback is exact on a single-DPI display.
+        if (this.pointer === drag && request === drag.positionRequest) {
+          const delta = cssDeltaToPhysical({ x: event.screenX - drag.screenX, y: event.screenY - drag.screenY }, drag.dpi);
+          this.queuePosition(this.macOS
+            ? new LogicalPosition(Math.round(drag.originX + delta.x / drag.dpi), Math.round(drag.originY + delta.y / drag.dpi))
+            : new PhysicalPosition(Math.round(drag.originX + delta.x), Math.round(drag.originY + delta.y)));
+        }
+        console.error(error);
+      }
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = this.pointer; if (!drag || !drag.initialized || drag.ending) return;
       const stepX = event.screenX - drag.lastMoveX, stepY = event.screenY - drag.lastMoveY;
       drag.lastMoveX = event.screenX; drag.lastMoveY = event.screenY;
       if (stepX === 0 && stepY === 0) return;
+      drag.startAccumX += stepX; drag.startAccumY += stepY;
       drag.directionAccumX += stepX; drag.directionAccumY += stepY;
-      const dx = event.screenX - drag.x, dy = event.screenY - drag.y;
-      if (Math.hypot(dx, dy) < 3 && !drag.moved) return;
+      if (!drag.moved && Math.hypot(drag.startAccumX, drag.startAccumY) < 3) return;
       drag.moved = true; this.lastMovement = performance.now();
       this.pet.classList.add('dragging');
       if (Math.hypot(drag.directionAccumX, drag.directionAccumY) >= 3) {
-        const turnX = drag.directionAccumX, turnY = drag.directionAccumY;
-        this.direction = Math.abs(turnX) > Math.abs(turnY) ? turnX > 0 ? 'right' : 'left' : turnY > 0 ? 'down' : 'up';
+        const dx = drag.directionAccumX, dy = drag.directionAccumY;
+        this.direction = Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up';
         drag.directionAccumX = 0; drag.directionAccumY = 0;
       }
-      this.queuePosition(new PhysicalPosition(Math.round(drag.originX + dx * drag.dpi), Math.round(drag.originY + dy * drag.dpi)));
-    });
+      const request = ++drag.positionRequest;
+      drag.positionWork = updateDrag(drag, event, request);
+    };
     const end = async (event: PointerEvent) => {
-      const drag = this.pointer; if (!drag || drag.id !== event.pointerId) return;
+      const drag = this.pointer; if (!drag || drag.id !== event.pointerId || drag.ending) return;
+      drag.ending = true;
+      // Flush the release location before dropping the pointer identity; otherwise
+      // the last asynchronous cursor request would be discarded on quick release.
+      if (event.type === 'pointerup' && drag.moved && drag.initialized) await updateDrag(drag, event, ++drag.positionRequest);
       this.pointer = null; this.pet.classList.remove('dragging');
       if (this.pet.hasPointerCapture(event.pointerId)) this.pet.releasePointerCapture(event.pointerId);
+      await drag.positionWork;
       await this.moving; await this.layoutWork; this.paint(performance.now());
+      await this.keepInWorkArea();
       if (event.type === 'pointerup' && drag.moved) await this.tryJoin();
     };
-    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) this.pet.addEventListener(name, event => { void end(event as PointerEvent).catch(console.error); });
-    this.pet.addEventListener('dblclick', event => {
+    this.pet.addEventListener('pointerdown', onPointerDown);
+    this.pet.addEventListener('pointermove', onPointerMove);
+    this.cleanups.push(() => this.pet.removeEventListener('pointerdown', onPointerDown));
+    this.cleanups.push(() => this.pet.removeEventListener('pointermove', onPointerMove));
+    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      const handler = (event: Event) => { void end(event as PointerEvent).catch(console.error); };
+      this.pet.addEventListener(name, handler);
+      this.cleanups.push(() => this.pet.removeEventListener(name, handler));
+    }
+    const onDoubleClick = (event: MouseEvent) => {
+      if (this.macOS && (event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
       if (this.paired) void this.split().catch(console.error);
       else { void this.menuAction('sleep').catch(console.error); }
-    });
+    };
+    this.pet.addEventListener('dblclick', onDoubleClick);
+    this.cleanups.push(() => this.pet.removeEventListener('dblclick', onDoubleClick));
   }
 }
-

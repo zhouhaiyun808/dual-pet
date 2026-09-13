@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
+    "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --bundles nsis",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "tauri:build": "node scripts/build.mjs",
+    "tauri:build:windows": "tauri build --bundles nsis",
+    "tauri:build:mac": "node scripts/build.mjs --target x86_64-apple-darwin --bundles app,dmg"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
