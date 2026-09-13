@@ -20,7 +20,7 @@ export class WindowPet {
   private ready = false;
   private lastFrame = 0;
   private lastMovement = 0;
-  private pointer: { id: number; x: number; y: number; originX: number; originY: number; dpi: number; moved: boolean } | null = null;
+  private pointer: { id: number; x: number; y: number; originX: number; originY: number; dpi: number; moved: boolean; lastMoveX: number; lastMoveY: number; directionAccumX: number; directionAccumY: number } | null = null;
   private pendingPosition: PhysicalPosition | null = null;
   private moving: Promise<void> | null = null;
   private layoutWork: Promise<void> = Promise.resolve();
@@ -224,17 +224,27 @@ export class WindowPet {
       if (event.button !== 0 || this.busy || this.pointer) return;
       this.pet.setPointerCapture(event.pointerId);
       // Register immediately so a quick release cannot leave a stale drag after awaiting window information.
-      const drag = { id: event.pointerId, x: event.screenX, y: event.screenY, originX: 0, originY: 0, dpi: 0, moved: false };
+      const drag = { id: event.pointerId, x: event.screenX, y: event.screenY, originX: 0, originY: 0, dpi: 0, moved: false, lastMoveX: event.screenX, lastMoveY: event.screenY, directionAccumX: 0, directionAccumY: 0 };
       this.pointer = drag;
       try { const [pos, dpi] = await Promise.all([this.win.outerPosition(), this.win.scaleFactor()]); drag.originX = pos.x; drag.originY = pos.y; drag.dpi = dpi; }
       catch (error) { this.pointer = null; console.error(error); }
     });
     this.pet.addEventListener('pointermove', event => {
       const drag = this.pointer; if (!drag || !drag.dpi) return;
+      const stepX = event.screenX - drag.lastMoveX, stepY = event.screenY - drag.lastMoveY;
+      drag.lastMoveX = event.screenX; drag.lastMoveY = event.screenY;
+      if (stepX === 0 && stepY === 0) return;
+      drag.directionAccumX += stepX; drag.directionAccumY += stepY;
       const dx = event.screenX - drag.x, dy = event.screenY - drag.y;
       if (Math.hypot(dx, dy) < 3 && !drag.moved) return;
       drag.moved = true; this.lastMovement = performance.now();
-      { this.pet.classList.add('dragging'); this.direction = Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up'; this.queuePosition(new PhysicalPosition(Math.round(drag.originX + dx * drag.dpi), Math.round(drag.originY + dy * drag.dpi))); }
+      this.pet.classList.add('dragging');
+      if (Math.hypot(drag.directionAccumX, drag.directionAccumY) >= 3) {
+        const turnX = drag.directionAccumX, turnY = drag.directionAccumY;
+        this.direction = Math.abs(turnX) > Math.abs(turnY) ? turnX > 0 ? 'right' : 'left' : turnY > 0 ? 'down' : 'up';
+        drag.directionAccumX = 0; drag.directionAccumY = 0;
+      }
+      this.queuePosition(new PhysicalPosition(Math.round(drag.originX + dx * drag.dpi), Math.round(drag.originY + dy * drag.dpi)));
     });
     const end = async (event: PointerEvent) => {
       const drag = this.pointer; if (!drag || drag.id !== event.pointerId) return;

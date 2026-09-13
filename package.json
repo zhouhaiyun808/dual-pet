@@ -7,7 +7,8 @@
     "build": "tsc && vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --bundles nsis"
+    "tauri:build": "tauri build --bundles nsis",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"

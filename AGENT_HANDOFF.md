@@ -102,3 +102,9 @@ npm run tauri:dev
 - Packaged executables and installers remain local and are excluded from Git.
 - Personal Codex skills, including `hatch-pet`, remain outside the repository.
 - No macOS branch should exist yet.
+
+## Windows 朝向修复同步：2026-09-13
+
+本次 main 仅同步江晏左右行走映射和两人的最近位移转向；Mac 移植继续保留在 mac-dev。原始素材、动画帧率、160ms 停步时间和 NSIS 配置保持不变。
+
+已在 Mac 上运行 Windows 控制器模拟测试及 TypeScript/Vite 构建；未构建 Windows 安装包。Windows 端拉取 main 后运行 `npm ci`、`npm run build`、`npm run tauri:build`，并真机验证左右慢拖及反向。回归测试 `npm test` 使用 Node 24。
