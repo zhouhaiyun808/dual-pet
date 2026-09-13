@@ -10,6 +10,7 @@
 - 保留 macOS DPI、拖动、菜单栏和打包实现，同时纳入 Windows 江晏朝向与慢拖转向修复。
 - Windows 平台配置改用 WebView2 在线 bootstrapper；macOS 构建配置不变。
 - 本次只整合基线，不加入定时睡眠、对话泡泡或养成玩法。
+- 用户已完成 Windows 与 macOS 原生回归，并确认全部验证通过。
 
 ### 2026-09-12 macOS 自用版（mac-dev）
 

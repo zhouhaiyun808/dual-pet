@@ -7,6 +7,7 @@
 - 保留分支：`main` 为 Windows 一期历史基线，`mac-dev` 为 macOS 一期历史基线；两者均未被覆盖。
 - 整合目标：保持 Win/Mac 已验收表现不变，为定时睡眠、对话泡泡和养成玩法建立唯一后续基线。
 - macOS 首版目标 Intel / macOS 13.0+，实际验收记录见 `MACOS_TESTING.md`。
+- 用户已于 2026-09-13 确认 Mac 与 Windows 全部回归验证通过；阶段 0 完成。
 
 ## 已完成的一期功能
 
@@ -58,7 +59,7 @@ Windows：`npm run tauri:dev`、`npm run tauri:build:windows`。
 
 ## 下一阶段
 
-按以下顺序推进 `v0.3`：公共状态与存档底座、定时睡眠、对话泡泡、轻量养成。新功能不要回填到 `main` 或 `mac-dev` 历史分支。
+`codex/v0.3-baseline` 已通过双平台验收。按以下顺序推进 `v0.3`：公共状态与存档底座、定时睡眠、对话泡泡、轻量养成。新功能不要回填到 `main` 或 `mac-dev` 历史分支。
 
 ## 分发与外部状态
 
