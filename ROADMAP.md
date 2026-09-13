@@ -1,35 +1,38 @@
 # Dual Pet Roadmap
 
-## 当前阶段：Windows 主线
+## 一期：Windows 与 macOS 桌宠
 
 - [x] 双透明桌宠窗口
-- [x] 拖动与走路动画
+- [x] 拖动、四方向走路与慢拖反向
 - [x] 缩放与恢复默认大小
-- [x] 单人睡觉/醒来
-- [x] 靠近组合亲亲与拆开
-- [x] Windows 离线安装包流程
-- [ ] 在干净的 Windows 环境验证仓库构建流程
-- [ ] 完善自动化测试与发布检查
-- [x] 单人/双人床、睡眠拖动、自动合床与混合睡醒交互
-- [ ] 实现定时睡眠
+- [x] 单人/双人睡眠和床
+- [x] 靠近组合、混合睡醒规则与拆开
+- [x] Windows NSIS 构建流程
+- [x] macOS app/dmg 构建、安装和启动
+- [x] macOS 菜单栏找回、DPI、Control-click 与窗口恢复
 
-## 跨电脑开发
+## 阶段 0：统一双平台基线
 
-- [x] 以 `main` 作为 Windows 默认分支
-- [x] 建立仓库内长期上下文文档
-- [ ] 在第二台电脑完成首次 clone、构建和启动验证
-- [ ] 每次跨电脑切换前更新 `AGENT_HANDOFF.md`
+- [x] 保留 `main` 和 `mac-dev` 一期历史分支
+- [x] 在 `codex/v0.3-baseline` 合并双平台实现
+- [x] 将 Windows WebView2 在线安装修复放入平台配置
+- [x] 合并 Windows 朝向修复与 macOS 拖动增强
+- [x] 自动化测试、Mac 开发版启动与 app/dmg 完整性验证
+- [ ] Mac 完整交互回归与 Windows 原生回归
+- [ ] 用户确认后确定后续统一基线
 
-## macOS（mac-dev）
+## v0.3：陪伴与养成
 
-- [x] 确认 Windows 稳定基线并沿用现有 `mac-dev` 分支
-- [x] 安装本机 Rust 与 npm 开发依赖
-- [x] 分离平台配置与 app/dmg 打包命令
-- [x] 透明置顶窗口、Accessory 与菜单栏入口
-- [x] Mac DPI 坐标、Control-click、恢复位置与状态回归测试
-- [x] 原生开发版启动，两个角色资源加载成功
-- [x] Release app/dmg 构建、签名与 DMG 校验、安装后启动
-- [ ] 原生交互与至少 30 分钟运行检查
-- [ ] 混合 DPI 外接屏、显示器拔除与 Windows 回归
+1. [ ] 公共状态与版本化存档底座
+2. [ ] 定时进入睡眠
+3. [ ] 对话泡泡与本地台词系统
+4. [ ] 羁绊、心情、精力与轻量互动
+5. [ ] Win/Mac 回归、打包与发布
 
-实际结果记录在 `MACOS_TESTING.md`。不把自动化模拟测试当作原生交互已经通过。
+## 后续验证
+
+- [ ] Windows 干净环境构建与安装
+- [ ] Mac 混合 DPI 外接屏和显示器拔除
+- [ ] 两个平台长时间运行检查
+
+实际 macOS 一期测试结果记录在 `MACOS_TESTING.md`。

@@ -2,7 +2,7 @@
 
 双角色桌面宠物应用。
 
-> `main` 保留 Windows 基线；`mac-dev` 开发 macOS 版。
+> Windows 和 macOS 一期已经完成；`main` 与 `mac-dev` 分别保留一期历史，后续功能在统一双平台基线上开发。
 >
 > Mac 首版面向 Intel / macOS 13 及以上，本机验收环境为 macOS 13.7.6。实际验证结果和未验证项目见 [MACOS_TESTING.md](MACOS_TESTING.md)。
 
@@ -20,7 +20,7 @@
 
 ## Windows 使用
 
-发布产物不保存在 Git 仓库中。获得安装包后，优先运行离线安装包；它会检测并补装 Microsoft Edge WebView2 Runtime。已有 WebView2 的电脑也可使用便携程序，但便携程序不会安装缺少的运行库。
+发布产物不保存在 Git 仓库中。安装包会先检测 Microsoft Edge WebView2 Runtime；如果缺少，会联网下载并安装。已有 WebView2 的电脑会跳过下载。便携程序不会安装缺少的运行库。
 
 目标电脑要求：
 
@@ -68,7 +68,7 @@ npm run tauri:build:windows
 
 Mac 打包自动使用 Tauri CI 模式，避免 Finder 自动化权限；DMG 保留应用和 Applications 快捷方式，省略图标自动排版。
 
-`npm run tauri:build` 按当前平台配置构建：Windows 为 NSIS，Mac 为 app/dmg。Windows 仍保留 WebView2 离线安装设置。
+`npm run tauri:build` 按当前平台配置构建：Windows 为 NSIS，Mac 为 app/dmg。Windows 安装包使用 WebView2 在线 bootstrapper，仅在目标电脑缺少运行库时下载。
 
 `index.html`、`src/` 和构建后的 `dist/` 是桌面应用的内嵌界面。`dist/` 属于生成文件，不提交到 Git。Mac 原生代码由条件编译隔离，跨平台共用 TypeScript 渲染和状态交互。
 
@@ -90,9 +90,9 @@ Mac 打包自动使用 Tauri CI 模式，避免 Finder 自动化权限；DMG 保
 
 ## 分支约定
 
-- `main`：当前 Windows 版本，也是默认分支。
-- `mac-dev`：当前 macOS 开发分支，沿用本机已经存在的分支。
-- 通用修复通过挑选提交或经过检查的合并共享，避免覆盖平台专属实现。
+- `main`：Windows 一期历史基线。
+- `mac-dev`：macOS 一期历史基线。
+- `codex/v0.3-baseline`：双平台整合与后续功能基线；确认后再决定是否合入默认分支。
 
 ## 项目记忆与安全
 

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 2026-09-13 双平台基线整合
+
+- 在独立整合分支合并 Windows 一期后续修复与 macOS 一期实现，保留原有两个历史分支。
+- 保留 macOS DPI、拖动、菜单栏和打包实现，同时纳入 Windows 江晏朝向与慢拖转向修复。
+- Windows 平台配置改用 WebView2 在线 bootstrapper；macOS 构建配置不变。
+- 本次只整合基线，不加入定时睡眠、对话泡泡或养成玩法。
+
 ### 2026-09-12 macOS 自用版（mac-dev）
 
 - 沿用已有 `mac-dev`，在 Intel macOS 上实现双透明置顶窗口与菜单栏找回/退出。

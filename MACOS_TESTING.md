@@ -85,3 +85,13 @@ Mac 的窗口物理坐标按窗口所在屏幕的 DPI 缩放，底层全局光�
 - 朝向改为最近移动累计达到 3 像素时判定；窗口位置仍使用按下起点。零位移不触发转向或刷新行走时间。
 - 保留角色帧间隔和 160ms 停步判定。
 - Mac/Windows 模拟分支均通过远拖后反向、小步累计、上下转向与零位移测试。本轮仅构建 Mac，未构建或真机验证 Windows。
+
+## 2026-09-13 双平台基线整合验证
+
+- 在 `codex/v0.3-baseline` 合入 Windows 主线后续修复，`main` 与 `mac-dev` 均保持不变。
+- 冲突处理保留 Mac 的 DPI、快速松手、恢复窗口和错误回滚实现；Windows 的最近位移转向逻辑已由同一套增强控制器覆盖。
+- Windows WebView2 在线 bootstrapper 仅写入 `tauri.windows.conf.json`，不改变 Mac 打包配置。
+- `npm run build`、21 项前端测试、`cargo check --locked` 和 5 项 Rust 测试通过。
+- 整合版 `tauri:dev` 启动成功；两个角色均报告 `ready dpr=2 canvas=160x176`。
+- 整合版 Intel app/dmg 构建成功；app 严格签名校验通过，DMG 校验和有效。
+- 完整原生交互仍按上方检查表人工验收；Windows 构建与真机回归需在 Windows 环境完成。
