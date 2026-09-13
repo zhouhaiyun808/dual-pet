@@ -20,7 +20,7 @@
 
 ## Windows 使用
 
-发布产物不保存在 Git 仓库中。获得安装包后，优先运行离线安装包；它会检测并补装 Microsoft Edge WebView2 Runtime。已有 WebView2 的电脑也可使用便携程序，但便携程序不会安装缺少的运行库。
+发布产物不保存在 Git 仓库中。安装包会先检测 Microsoft Edge WebView2 Runtime；如果缺少，会联网下载并安装。已有 WebView2 的电脑会跳过下载。便携程序不会安装缺少的运行库。
 
 目标电脑要求：
 

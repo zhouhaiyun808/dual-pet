@@ -30,7 +30,7 @@ Build an NSIS package with `npm run tauri:build`.
 ## Known limitations
 
 - Windows 10/11 x64 is the only currently supported platform.
-- WebView2 Runtime is required on target Windows computers.
+- WebView2 Runtime is required on target Windows computers; the NSIS installer uses the online bootstrapper and downloads it only when missing.
 - Beds, sleeping drag, and automatic pairing are implemented; scheduled sleep is not.
 - 2026-09-12: frontend/Rust checks and NSIS build passed; user confirmed basic interactions passed manual testing.
 - Joining adopts the stationary pet's sleep state. When both sleep, bed color follows the dragged pet; when only the stationary pet sleeps, use its bed color. Splitting wakes both.
