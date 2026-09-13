@@ -20,11 +20,16 @@
 - [ ] 在第二台电脑完成首次 clone、构建和启动验证
 - [ ] 每次跨电脑切换前更新 `AGENT_HANDOFF.md`
 
-## macOS
+## macOS（mac-dev）
 
-- [ ] 确认 Windows `main` 达到适合移植的稳定点
-- [ ] 从稳定的 `main` 创建 `macos` 分支
-- [ ] 适配窗口行为、权限、打包和运行依赖
-- [ ] 将通用修复通过受控合并或挑选提交同步到平台分支
+- [x] 确认 Windows 稳定基线并沿用现有 `mac-dev` 分支
+- [x] 安装本机 Rust 与 npm 开发依赖
+- [x] 分离平台配置与 app/dmg 打包命令
+- [x] 透明置顶窗口、Accessory 与菜单栏入口
+- [x] Mac DPI 坐标、Control-click、恢复位置与状态回归测试
+- [x] 原生开发版启动，两个角色资源加载成功
+- [x] Release app/dmg 构建、签名与 DMG 校验、安装后启动
+- [ ] 原生交互与至少 30 分钟运行检查
+- [ ] 混合 DPI 外接屏、显示器拔除与 Windows 回归
 
-本阶段不创建空的 `macos` 分支。
+实际结果记录在 `MACOS_TESTING.md`。不把自动化模拟测试当作原生交互已经通过。

@@ -1,104 +1,64 @@
 # Agent Handoff
 
-## Purpose and architecture
+## 当前接手点：2026-09-12 macOS 移植
 
-Dual Pet is a two-character Windows desktop pet built with Tauri 2, Rust, TypeScript, and Vite. Read `PROJECT_CONTEXT.md` for architecture and product decisions.
+- 项目：Dual Pet，Tauri 2 + Rust + TypeScript/Vite 双角色桌宠。
+- 分支：沿用 Mac 本机已有 `mac-dev`；`main` 保留 Windows 基线。不要另建旧计划中的 `macos`。
+- Windows 已测试功能基线：`40ac355`；交接文档提交：`c46c37a`。
+- 用户授权完整移植；Mac 首版自用，Intel / macOS 13.0+，本机为 13.7.6 / 2x 屏。
+- 实际验证结果和剩余人工验收见 `MACOS_TESTING.md`，不要把模拟测试当成原生 UI 验证。
 
-## Current checkpoint
+## 已加入的实现
 
-- Branch: `main`
-- Platform represented by `main`: Windows
-- Version: `0.2.0`
-- macOS branch: not created; create `macos` only when macOS work actually starts
+- 平台配置分别为 `tauri.macos.conf.json` / `tauri.windows.conf.json`；默认构建按平台选 app/dmg 或 NSIS。
+- macOS 透明无边框置顶窗口在资源和布局准备后显示；不自动跨 Spaces，也不覆盖全屏。
+- 菜单栏找回/退出；托盘创建成功才启用 Accessory（隐藏 Dock），失败保留普通应用策略。
+- Mac 光标按主屏 DPI、窗口/显示器按各自 DPI 归一到逻辑坐标，Windows 保持物理坐标。
+- DPR 纳入画布缓存；窗口大小变化使用工作区约束；显示器变化或菜单栏找回可恢复可见窗口。
+- Control-click 不开始拖动或双击睡醒；快速松手刷新最终位置，取消拖动不合并。
+- 双人状态仍由 Rust 管理；合并拒绝条件在隐藏伙伴前判断，拆开成功后清理所有权与睡眠状态。
+- 前端初始化失败显示可退出的错误窗口，并输出 Rust 日志。
+- `npm test` 使用 Node 24 内置 test runner 和 mock 适配器测试真实前端控制器；Rust 单元测试覆盖双向四种状态、重复合并、过期请求与拆开。
 
-## Completed
+## 开发与构建
 
-- Existing Windows application and assets are present.
-- Repository documentation and safe ignore rules are prepared for cross-computer synchronization.
-- Generated applications, installers, dependencies, caches, and Rust build output are intentionally excluded.
-
-## Verification
-
-```powershell
-npm install
-npm run build
-npm run tauri:dev
-```
-
-Build an NSIS package with `npm run tauri:build`.
-
-## Known limitations
-
-- Windows 10/11 x64 is the only currently supported platform.
-- WebView2 Runtime is required on target Windows computers.
-- Beds, sleeping drag, and automatic pairing are implemented; scheduled sleep is not.
-- 2026-09-12: frontend/Rust checks and NSIS build passed; user confirmed basic interactions passed manual testing.
-- Joining adopts the stationary pet's sleep state. When both sleep, bed color follows the dragged pet; when only the stationary pet sleeps, use its bed color. Splitting wakes both.
-- GitHub does not reproduce local application state, installed toolchains, Codex credentials, or full chat transcripts.
-
-## Mac 接手：2026-09-12
-
-### 交接状态
-
-- 已推送源码：`40ac355f1227821fb767bfa82b2622392f86ee57`，仓库 `https://github.com/zhouhaiyun808/dual-pet.git`，分支 `main`。
-- 用户确认 Windows 基础表现全部测试通过；这是 macOS 移植的基线。
-- 用户下一步要在 Mac 上开始开发 macOS 版。尚未创建 `macos` 分支，也尚未做 macOS 编译或运行验证。
-- GitHub Release **尚未发布**：上传命令被自动审批额度限制拦截，不能认为安装包已上传。准备使用标签 `v0.2.0`、目标提交 `40ac355`。
-- Windows 安装包仍在本地 `src-tauri/target/release/bundle/nsis/Dual Pet_0.2.0_x64-setup.exe`；程序在 `src-tauri/target/release/dual-pet.exe`。二者都不随 Git 同步。
-- Release note 草稿在 Windows 本地被忽略的 `tmp/release-v0.2.0.md`，Mac 可依据 CHANGELOG 重建。
-- 本次仅交接代码和仓库文档；未同步聊天记录，也未配置或操作聊天仓库。不要假定 Mac 能看到本对话。
-
-### 在 Mac 上开始
-
-1. 安装/确认 Git、Node.js/npm、Rust/Cargo 和 Xcode Command Line Tools；根据本机 CPU 选择 Rust 工具链。Windows 的已安装工具不会随仓库迁移。
-2. 登录有权访问该仓库的 GitHub 账号，将项目 clone 到自己选择的本地目录；Windows 路径 `C:\My Projects Codex\dual-pet` 不应写入 Mac 配置。
+本机已安装 Rust stable 1.98.1，位置 `~/.cargo/bin`；Node 24.14.1，Xcode Command Line Tools / macOS SDK 13.3。
 
 ```sh
-git clone https://github.com/zhouhaiyun808/dual-pet.git
-cd dual-pet
-git status --short
-git switch main
-git pull --ff-only
-git switch -c macos
 npm ci
 npm run build
-cargo check --manifest-path src-tauri/Cargo.toml
+npm test
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 npm run tauri:dev
+npm run tauri:build:mac
 ```
 
-如果目录或 `macos` 分支已存在，先检查其改动和远端，再切换已有分支；不要覆盖、强制重置或重复创建。`macos` 从更新后的稳定 `main` 开始，Windows 主线继续保留在 `main`。
+若当前终端未找到 Cargo，运行 `. "$HOME/.cargo/env"` 或重开终端。Mac 使用系统 WKWebView，不需要 WebView2。
 
-### 移植重点
+产物位于 `src-tauri/target/x86_64-apple-darwin/release/bundle/`。不提交依赖、缓存、安装包或生成资源；不把本机应用运行状态当成 Git 同步内容。
 
-- `src/window-pet.ts`：Canvas 绘制、DPI/屏幕坐标、拖动、缩放、睡眠、窗口合并/拆开。
-- `src/assets.ts`：透明边缘清理、最大连通域、图片裁切；蓝色单人床右下柱在加载时使用双人床原图局部补齐。不要直接替换成图像生成的整床版本。
-- `src-tauri/src/lib.rs`：两个窗口共享的 PairState/SleepState、系统右键菜单、隐藏/显示伙伴窗口。
-- `src-tauri/tauri.conf.json` 与 `src-tauri/capabilities/default.json`：验证 macOS 透明窗口、无边框、置顶、隐藏任务栏、窗口事件和权限；需要的 macOS 专属配置应在移植时查验当前 Tauri 文档。
-- `package.json` 的 `tauri:build` 明确指定 `--bundles nsis`，当前配置也只打 NSIS。Mac 必须适配为 `.app`/`.dmg` 构建流程，不能直接沿用 Windows 打包命令。签名、公证、分发另行处理，不假定已配置 Apple 开发者账号。
-- 优先让开发版启动，再验证 Retina、多显示器工作区、拖动偏移、透明边缘、右键菜单、伙伴隐藏/显示以及 Spaces/全屏窗口行为。Windows 已通过不代表 Mac 已通过。
+Tauri 2.11.5 的 managed-feature 校验要求顶层 `tauri` dependency 与 `macOSPrivateApi` 匹配，所以该开关共用声明，Windows 上不产生原生效果。不要重新拆到同名 target dependency 导致 `cargo check` 校验失败。
 
-### 必须保留的交互
+## 必须保留的产品规则
 
-| 拖动者状态 | 另一人状态 | 合并结果 |
+| 拖动者 | 静止者 | 合并结果 |
 | --- | --- | --- |
 | 醒 | 醒 | 双人亲亲 |
 | 睡 | 睡 | 双人睡眠，床色跟随拖动者 |
-| 醒 | 睡 | 双人睡眠，床色跟随原来睡着的人 |
-| 睡 | 醒 | 两人醒来，双人亲亲 |
+| 醒 | 睡 | 双人睡眠，沿用静止者床色 |
+| 睡 | 醒 | 一起醒来亲亲 |
 
-- 陈子奚 `pet-a`：绿床；江晏 `pet-b`：蓝床。相同缩放比例下单人床同宽。
-- 单人/双人睡眠均能拖动，不自动唤醒；靠近松手时判断合并。
-- 人物头部露在枕头上，身体被被子遮挡，保留当前已通过测试的比例。
-- 拆开双人组合后，两人均醒来；不能恢复隐藏窗口之前的睡眠状态。
-- 组合右键进入睡眠时随机选双人床；这与拖动合床时按角色选色是两条不同规则。
-- 单人双击切换睡眠/醒来，双人双击拆开。定时睡眠未实现。
+- 陈子奚 `pet-a` 使用绿床，江晏 `pet-b` 使用蓝床；相同缩放下单人床同宽。
+- 单人/双人睡眠均可拖动，不自动唤醒；松手才判断合并。
+- 组合右键睡眠随机选床；拆开后两人都醒。
+- 单人双击睡醒，双人双击拆开。
+- 不更换现有素材；蓝色单人床右下柱的局部补齐保留于 `src/assets.ts`。
+- 每次启动恢复默认大小与初始状态；不增加定时睡眠、自动更新、开机启动或新的状态持久化。
 
-### 给 Mac 上新任务的提示
+## 分发与外部状态
 
-> 阅读 AGENT_HANDOFF.md、PROJECT_CONTEXT.md、README.md、CHANGELOG.md、ROADMAP.md。以 main 中已测试的 Windows 基线为起点，在 macos 分支实现 macOS 版。先检查本机工具和分支状态，再适配 Tauri 窗口及打包配置，验证交接文档中的全部交互。当前 Windows 安装包未上传 Release；不要把 Windows 构建通过当成 Mac 验证通过。
-
-## External state
-
-- Packaged executables and installers remain local and are excluded from Git.
-- Personal Codex skills, including `hatch-pet`, remain outside the repository.
-- No macOS branch should exist yet.
+- Mac 首版仅 ad-hoc 签名，自用；未配置 Developer ID、公证或公开 Release。
+- Windows 安装包历史上只在 Windows 本机生成；此前上传 Release 被审批限制拦截，不能声称已上传。
+- 没有修改 Windows `main`，没有覆盖远端分支或同步 Codex 凭据/数据库。
+- 本次委派的两个 GPT-5.6 Luna 子代理已因用量限制停止；父任务已接手实现和集成，不应等待它们继续运行。

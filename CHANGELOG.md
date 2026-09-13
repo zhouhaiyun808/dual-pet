@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 2026-09-12 macOS 自用版（mac-dev）
+
+- 沿用已有 `mac-dev`，在 Intel macOS 上实现双透明置顶窗口与菜单栏找回/退出。
+- 保留 Windows 全部现有角色、床素材、睡眠、合床和拆开规则。
+- 处理 Mac 混合 DPI 坐标、静止 Canvas DPR 更新、Control-click、快速松手和屏幕工作区边界。
+- 增加前端失败回滚和初始化错误窗口，防止隐藏应用无从退出。
+- 增加 14 项前端测试与 5 项 Rust 测试，分离 Windows NSIS 与 Mac app/dmg 打包。
+- 本机 ad-hoc 签名 app/dmg 已生成，DMG 校验、挂载和安装到 Applications 后启动通过。
+- Mac 打包使用 Tauri CI 模式跳过 Finder 自动化装饰；不要求 Finder 控制权限。
+- 原生人工交互、外接屏和 Windows 回归状态见 `MACOS_TESTING.md`；不把模拟测试记作人工通过。
+
 ### 2026-09-12 已测试检查点
 
 - 新增绿色/蓝色单人床及双人床，陈用绿床、江用蓝床；单人床同宽。
@@ -22,7 +33,7 @@
 
 - 项目显示名称统一为 Dual Pet。
 - 明确 `main` 为当前 Windows 主分支。
-- 明确 macOS 版本将在实际启动时创建 `macos` 分支。
+- 原先计划新建 `macos`；实际开始时发现已有 `mac-dev`，因此沿用现有分支。
 
 ## [0.2.0] - 2026-09-11
 

@@ -2,9 +2,9 @@
 
 双角色桌面宠物应用。
 
-> **当前平台：Windows**
+> `main` 保留 Windows 基线；`mac-dev` 开发 macOS 版。
 >
-> 默认分支 `main` 当前仅支持 Windows。macOS 版本尚未开始；实际启动移植时，将从届时稳定的 `main` 创建 `macos` 分支。
+> Mac 首版面向 Intel / macOS 13 及以上，本机验收环境为 macOS 13.7.6。实际验证结果和未验证项目见 [MACOS_TESTING.md](MACOS_TESTING.md)。
 
 ## 功能
 
@@ -27,20 +27,50 @@
 - 64 位 Windows 10 或 Windows 11
 - Microsoft Edge WebView2 Runtime
 
-## 开发环境
+## macOS 使用与开发
 
-- Node.js 与 npm
-- Rust 与 Cargo
-- C++ 构建工具和 Windows SDK
-- Tauri 2 所需的 Windows 开发依赖
+Mac 版保留上述所有交互。桌宠在所在 Space 的普通窗口上方显示，不覆盖全屏应用，也不自动跟随所有桌面。菜单栏图标提供「找回桌宠」和「退出桌宠」。Control-click、鼠标右键或触控板双指点击可打开角色菜单。
 
-```powershell
-npm install
+- 目标：Intel Mac，macOS 13.0+；Apple Silicon 原生包尚未验证。
+- 运行时使用系统 WKWebView，无需安装 WebView2、Node 或 Rust。
+- 自用安装包为 ad-hoc 签名 `.app` / `.dmg`，没有 Developer ID 签名或公证，不作为公开分发版本。
+- 安装：打开 DMG，将 Dual Pet 拖到 Applications，再从 Applications 启动。
+- 找回桌宠不拆开组合、不唤醒、不改变当前缩放；每次重新启动仍恢复默认大小与初始状态。
+
+开发依赖：Node.js 24（包含测试所用的 Node 模块 hook）、npm、Rust stable/Cargo、Xcode Command Line Tools。使用现有 `mac-dev` 分支，不要重复创建旧交接文档提到的 `macos` 分支。
+
+```sh
+npm ci
+npm run build
+npm test
+cargo check --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 npm run tauri:dev
-npm run tauri:build
+npm run tauri:build:mac
 ```
 
-`index.html`、`src/` 和构建后的 `dist/` 是桌面应用的内嵌界面。`dist/` 属于生成文件，不提交到 Git。
+Intel Mac 产物位置：
+
+- `src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Dual Pet.app`
+- `src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/`
+
+## Windows 开发环境
+
+需要 Node.js/npm、Rust/Cargo、C++ 构建工具和 Windows SDK。
+
+```powershell
+npm ci
+npm run build
+npm test
+npm run tauri:dev
+npm run tauri:build:windows
+```
+
+Mac 打包自动使用 Tauri CI 模式，避免 Finder 自动化权限；DMG 保留应用和 Applications 快捷方式，省略图标自动排版。
+
+`npm run tauri:build` 按当前平台配置构建：Windows 为 NSIS，Mac 为 app/dmg。Windows 仍保留 WebView2 离线安装设置。
+
+`index.html`、`src/` 和构建后的 `dist/` 是桌面应用的内嵌界面。`dist/` 属于生成文件，不提交到 Git。Mac 原生代码由条件编译隔离，跨平台共用 TypeScript 渲染和状态交互。
 
 ## 跨电脑继续开发
 
@@ -61,7 +91,7 @@ npm run tauri:build
 ## 分支约定
 
 - `main`：当前 Windows 版本，也是默认分支。
-- `macos`：未来正式开始 macOS 移植时创建，本次不预建。
+- `mac-dev`：当前 macOS 开发分支，沿用本机已经存在的分支。
 - 通用修复通过挑选提交或经过检查的合并共享，避免覆盖平台专属实现。
 
 ## 项目记忆与安全

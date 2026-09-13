@@ -20,6 +20,12 @@ type Drag = {
   positionWork: Promise<void> | null;
   primaryDpi: number;
   ending: boolean;
+  lastMoveX: number;
+  lastMoveY: number;
+  startAccumX: number;
+  startAccumY: number;
+  directionAccumX: number;
+  directionAccumY: number;
 };
 export class WindowPet {
   private win = getCurrentWindow();
@@ -58,6 +64,14 @@ export class WindowPet {
     };
     document.addEventListener('contextmenu', contextMenu);
     this.cleanups.push(() => document.removeEventListener('contextmenu', contextMenu));
+    const blockSelection = (event: Event) => {
+      event.preventDefault();
+      window.getSelection?.()?.removeAllRanges();
+    };
+    document.addEventListener('selectstart', blockSelection);
+    document.addEventListener('dragstart', blockSelection);
+    this.cleanups.push(() => document.removeEventListener('selectstart', blockSelection));
+    this.cleanups.push(() => document.removeEventListener('dragstart', blockSelection));
   }
   async init() {
     this.tauriCleanups.push(await this.win.listen('pair-split', () => {
@@ -357,6 +371,7 @@ export class WindowPet {
       // macOS synthesizes Control-click as a primary-button event. Let the
       // contextmenu handler own it instead of starting a drag.
       if (event.button !== 0 || (this.macOS && (event.ctrlKey || event.metaKey)) || this.busy || this.recovering || this.pointer) return;
+      event.preventDefault();
       try { this.pet.setPointerCapture(event.pointerId); } catch (error) { console.error(error); return; }
       // Register immediately so a quick release cannot leave a stale drag after awaiting window information.
       const drag: Drag = {
@@ -364,6 +379,8 @@ export class WindowPet {
         originX: 0, originY: 0, cursorX: 0, cursorY: 0, dpi: 0,
         moved: false, initialized: false, positionRequest: 0, positionWork: null,
         primaryDpi: 1, ending: false,
+        lastMoveX: event.screenX, lastMoveY: event.screenY,
+        startAccumX: 0, startAccumY: 0, directionAccumX: 0, directionAccumY: 0,
       };
       this.pointer = drag;
       try {
@@ -412,11 +429,19 @@ export class WindowPet {
     };
     const onPointerMove = (event: PointerEvent) => {
       const drag = this.pointer; if (!drag || !drag.initialized || drag.ending) return;
-      const dx = event.screenX - drag.screenX, dy = event.screenY - drag.screenY;
-      if (Math.hypot(dx, dy) < 3 && !drag.moved) return;
+      const stepX = event.screenX - drag.lastMoveX, stepY = event.screenY - drag.lastMoveY;
+      drag.lastMoveX = event.screenX; drag.lastMoveY = event.screenY;
+      if (stepX === 0 && stepY === 0) return;
+      drag.startAccumX += stepX; drag.startAccumY += stepY;
+      drag.directionAccumX += stepX; drag.directionAccumY += stepY;
+      if (!drag.moved && Math.hypot(drag.startAccumX, drag.startAccumY) < 3) return;
       drag.moved = true; this.lastMovement = performance.now();
       this.pet.classList.add('dragging');
-      this.direction = Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up';
+      if (Math.hypot(drag.directionAccumX, drag.directionAccumY) >= 3) {
+        const dx = drag.directionAccumX, dy = drag.directionAccumY;
+        this.direction = Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'down' : 'up';
+        drag.directionAccumX = 0; drag.directionAccumY = 0;
+      }
       const request = ++drag.positionRequest;
       drag.positionWork = updateDrag(drag, event, request);
     };
@@ -444,6 +469,7 @@ export class WindowPet {
     }
     const onDoubleClick = (event: MouseEvent) => {
       if (this.macOS && (event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
       if (this.paired) void this.split().catch(console.error);
       else { void this.menuAction('sleep').catch(console.error); }
     };

@@ -16,6 +16,7 @@
         "shadow": false,
         "skipTaskbar": true,
         "focus": false,
+        "acceptFirstMouse": true,
         "visible": false,
         "visibleOnAllWorkspaces": false
       },
@@ -32,6 +33,7 @@
         "shadow": false,
         "skipTaskbar": true,
         "focus": false,
+        "acceptFirstMouse": true,
         "visible": false,
         "visibleOnAllWorkspaces": false
       }

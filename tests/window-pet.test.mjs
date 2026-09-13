@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+import { getWalkAssetDirection } from '../src/assets.ts';
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -29,6 +30,7 @@ class PhysicalPosition extends Position {}
 class LogicalSize {constructor(width,height) {this.width=width;this.height=height;} }
 const windows = new Map();
 let active, cursor, menus, sleeping, owner, display;
+let clearedSelections;
 const listeners = new Map();
 const native = {
   getCurrentWindow: () => active,
@@ -67,10 +69,13 @@ function element() {
     handlers, style:{setProperty(){}}, classList:{add(){},remove(){}},
     addEventListener(name,fn) {handlers.set(name,fn);}, removeEventListener(name){handlers.delete(name);},
     setPointerCapture(){}, hasPointerCapture(){return false;}, releasePointerCapture(){},
-    async fire(name, extra={}) {return handlers.get(name)?.({type:name,button:0,pointerId:1,screenX:100,screenY:100,preventDefault(){},...extra});},
+    async fire(name, extra={}) {
+      const event={type:name,button:0,pointerId:1,screenX:100,screenY:100,defaultPrevented:false,preventDefault(){this.defaultPrevented=true;},...extra};
+      await handlers.get(name)?.(event); return event;
+    },
   };
 }
-async function setup(dpi=2, guestDpi=2) {
+async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
   windows.clear(); listeners.clear(); menus=[]; sleeping=new Map(); owner=null;
   display={position:{x:0,y:0},size:{width:3584,height:2240},workArea:{position:{x:0,y:50},size:{width:3584,height:2190}},scaleFactor:2};
   function make(label,scale) {
@@ -88,8 +93,9 @@ async function setup(dpi=2, guestDpi=2) {
   const canvas={width:0,height:0,getContext:()=>context};
   doc.querySelector=selector=>selector==='#pet-image'?canvas:petElement;
   globalThis.document=doc;
-  globalThis.window={devicePixelRatio:dpi,setInterval:()=>1,clearInterval(){}};
-  Object.defineProperty(globalThis,'navigator',{value:{userAgent:'Macintosh'},configurable:true});
+  clearedSelections=0;
+  globalThis.window={devicePixelRatio:dpi,setInterval:()=>1,clearInterval(){},getSelection:()=>({removeAllRanges(){clearedSelections++;}})};
+  Object.defineProperty(globalThis,'navigator',{value:{userAgent:platform},configurable:true});
   globalThis.localStorage={setItem(){}};
   const profile={config:{id:'pet-a',partnerId:'pet-b',baseSize:80,frameMs:100},scale:1,minScale:.55,maxScale:4};
   const pet=new WindowPet(profile); await pet.init();
@@ -163,4 +169,80 @@ test('pointer cancellation never combines pets and releases drag state', async (
   await petElement.fire('pointermove',{screenX:110});
   await petElement.fire('pointercancel');await settle();
   assert.equal(pet.pointer,null);assert.equal(owner,null);pet.destroy();
+});
+
+test('pet-b walk assets swap only horizontal directions at the loading layer', () => {
+  assert.equal(getWalkAssetDirection('pet-b', 'left'), 'right');
+  assert.equal(getWalkAssetDirection('pet-b', 'right'), 'left');
+  assert.equal(getWalkAssetDirection('pet-b', 'up'), 'up');
+  assert.equal(getWalkAssetDirection('pet-b', 'down'), 'down');
+  assert.equal(getWalkAssetDirection('pet-a', 'left'), 'left');
+});
+
+for (const platform of ['Macintosh', 'Windows']) {
+  test(`drag direction uses recent movement and accumulates slow steps (${platform})`, async () => {
+    const {pet,petElement}=await setup(2,2,platform);
+    await petElement.fire('pointerdown');
+    await petElement.fire('pointermove',{screenX:101,screenY:100});
+    await petElement.fire('pointermove',{screenX:102,screenY:100});
+    await petElement.fire('pointermove',{screenX:103,screenY:100});
+    assert.equal(pet.direction,'right');
+    await petElement.fire('pointermove',{screenX:200,screenY:100});
+    assert.equal(pet.direction,'right');
+    // A small reversal turns only after its own recent-motion threshold; it
+    // never needs to cross the original pointer-down position.
+    await petElement.fire('pointermove',{screenX:199,screenY:100});
+    assert.equal(pet.direction,'right');
+    await petElement.fire('pointermove',{screenX:198,screenY:100});
+    assert.equal(pet.direction,'right');
+    await petElement.fire('pointermove',{screenX:197,screenY:100});
+    await settle();
+    assert.equal(pet.direction,'left');
+    pet.destroy();
+  });
+
+  test(`drag direction handles vertical turns and ignores zero displacement (${platform})`, async () => {
+    const {pet,petElement}=await setup(2,2,platform);
+    await petElement.fire('pointerdown');
+    await petElement.fire('pointermove',{screenX:100,screenY:101});
+    await petElement.fire('pointermove',{screenX:100,screenY:102});
+    await petElement.fire('pointermove',{screenX:100,screenY:103});
+    assert.equal(pet.direction,'down');
+    const lastMovement=pet.lastMovement;
+    await petElement.fire('pointermove',{screenX:100,screenY:103});
+    assert.equal(pet.direction,'down');
+    assert.equal(pet.lastMovement,lastMovement);
+    await petElement.fire('pointermove',{screenX:100,screenY:102});
+    await petElement.fire('pointermove',{screenX:100,screenY:100});
+    await settle();
+    assert.equal(pet.direction,'up');
+    await petElement.fire('pointercancel');pet.destroy();
+  });
+}
+
+test('selection and native image dragging are blocked, then listeners are cleaned up', async () => {
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /-webkit-user-select\s*:\s*none/);
+  assert.match(css, /-webkit-user-drag\s*:\s*none/);
+  const {pet, petElement, doc}=await setup();
+  const selection = await doc.fire('selectstart');
+  const nativeDrag = await doc.fire('dragstart');
+  assert.equal(selection.defaultPrevented, true);
+  assert.equal(nativeDrag.defaultPrevented, true);
+  assert.equal(clearedSelections, 2);
+  const down = await petElement.fire('pointerdown');
+  assert.equal(down.defaultPrevented, true);
+  await petElement.fire('pointercancel');
+  pet.destroy();
+  const afterDestroy = await doc.fire('selectstart');
+  assert.equal(afterDestroy.defaultPrevented, false);
+});
+
+test('normal double-click keeps the existing sleep action while suppressing browser default', async () => {
+  const {pet, petElement}=await setup();
+  const dblclick = await petElement.fire('dblclick');
+  await settle();
+  assert.equal(dblclick.defaultPrevented, true);
+  assert.equal(pet.sleeping, true);
+  pet.destroy();
 });

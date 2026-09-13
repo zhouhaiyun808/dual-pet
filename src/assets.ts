@@ -58,9 +58,14 @@ export function getStaticFrame(id: string, name: string) {
 export function getBedFrame(color: 'green' | 'blue', paired: boolean) {
   return `/assets/beds/${color}-${paired ? 'double' : 'single'}.png`;
 }
+export function getWalkAssetDirection(id: string, direction: Direction): Direction {
+  if (id === 'pet-b' && direction === 'left') return 'right';
+  if (id === 'pet-b' && direction === 'right') return 'left';
+  return direction;
+}
 export async function getWalkFrames(id: string, direction: Direction): Promise<string[]> {
-  const frames = Array.from({ length: id === 'pet-a' ? 7 : 4 }, (_, i) => `/assets/${id}/walk-${direction}/${String(i + 1).padStart(2, '0')}.png`);
+  const assetDirection = getWalkAssetDirection(id, direction);
+  const frames = Array.from({ length: id === 'pet-a' ? 7 : 4 }, (_, i) => `/assets/${id}/walk-${assetDirection}/${String(i + 1).padStart(2, '0')}.png`);
   await Promise.all(frames.map(loadSprite)); return frames;
 }
-
 
