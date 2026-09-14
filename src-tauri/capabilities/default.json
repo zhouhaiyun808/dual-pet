@@ -4,12 +4,15 @@
   "description": "Permissions for dual transparent pet windows",
   "windows": [
     "pet-a",
-    "pet-b"
+    "pet-b",
+    "settings",
+    "counter"
   ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-show",
+    "core:window:allow-hide",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
     "core:window:allow-outer-position",

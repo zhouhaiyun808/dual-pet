@@ -1,164 +1,198 @@
-#[derive(Default)]
-struct PairState(std::sync::Mutex<Option<String>>);
-
-#[derive(Default)]
-struct SleepState(std::sync::Mutex<std::collections::HashMap<String, bool>>);
-
+mod input;
+mod runtime;
+mod state;
+mod store;
+#[cfg(debug_assertions)]
+pub mod diagnostics;
 #[cfg(target_os = "macos")]
 mod macos;
+use serde::Serialize;
+use tauri::{Emitter, EventTarget, Manager};
+use state::{Activity, AppAction, AppSnapshot, PetId};
+use runtime::Runtime;
 
-#[tauri::command]
-fn set_sleeping(window: tauri::WebviewWindow, state: tauri::State<SleepState>, sleeping: bool) -> Result<(), String> {
-    state.0.lock().map_err(|e| e.to_string())?.insert(window.label().to_string(), sleeping);
-    Ok(())
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PetMenuAction {
+    action: String,
+    target_window: String,
+    pet: String,
 }
 
 #[tauri::command]
-fn quit_pets(app: tauri::AppHandle) { app.exit(0); }
-
-fn owns_pair(owner: &Option<String>, label: &str) -> bool {
-    owner.as_deref() == Some(label)
+fn get_app_state(app: tauri::AppHandle) -> Result<AppSnapshot, String> {
+    app.state::<Runtime>().snapshot()
 }
-
 #[tauri::command]
-fn join_pair(window: tauri::WebviewWindow, app: tauri::AppHandle, state: tauri::State<PairState>, sleep_state: tauri::State<SleepState>, sleeping: bool) -> Result<Option<bool>, String> {
-    use tauri::Manager;
-    let mut owner = state.0.lock().map_err(|e| e.to_string())?;
-    let other = if window.label() == "pet-a" { "pet-b" } else { "pet-a" };
-    let mut sleeps = sleep_state.0.lock().map_err(|e| e.to_string())?;
-    let Some(combined_sleeping) = join_outcome(owner.as_deref(), &sleeps, window.label(), other, sleeping) else { return Ok(None); };
-    let guest = app.get_webview_window(other).ok_or("Partner window missing")?;
-    guest.hide().map_err(|e| e.to_string())?;
-    commit_pair(&mut owner, &mut sleeps, window.label(), other, combined_sleeping);
-    Ok(Some(combined_sleeping))
+fn get_input_counts(app: tauri::AppHandle) -> Result<runtime::InputCounts, String> {
+    app.state::<Runtime>().input_counts()
 }
-
 #[tauri::command]
-fn split_pair(window: tauri::WebviewWindow, app: tauri::AppHandle, state: tauri::State<PairState>, sleep_state: tauri::State<SleepState>, x: i32, y: i32) -> Result<(), String> {
-    use tauri::{Manager, Emitter};
-    let mut owner = state.0.lock().map_err(|e| e.to_string())?;
-    if !owns_pair(&owner, window.label()) { return Ok(()); }
-    let other = if window.label() == "pet-a" { "pet-b" } else { "pet-a" };
-    let guest = app.get_webview_window(other).ok_or("Partner window missing")?;
-    guest.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-    let mut sleeps = sleep_state.0.lock().map_err(|e| e.to_string())?;
-    // Complete the native window transition before committing the logical split.
-    // If showing the guest fails, the pair remains intact and can be recovered from
-    // the tray through its visible owner.
-    guest.show().map_err(|e| e.to_string())?;
-    if let Err(error) = guest.emit("pair-split", ()) {
-        // Keep the native window state aligned with the still-paired logical
-        // state if the hidden guest cannot receive its reset event.
-        let _ = guest.hide();
-        return Err(error.to_string());
+fn get_input_health(app: tauri::AppHandle) -> input::InputHealth {
+    app.state::<Runtime>().input_health()
+}
+#[tauri::command]
+fn get_double_click_interval() -> f64 {
+    #[cfg(target_os = "macos")]
+    { return macos::double_click_interval_ms(); }
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" { fn GetDoubleClickTime() -> u32; }
+        return unsafe { GetDoubleClickTime() as f64 };
     }
-    mark_pair_split(&mut owner, &mut sleeps, window.label(), other);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { 500.0 }
+}
+#[tauri::command]
+fn dispatch_action(app: tauri::AppHandle, action: AppAction, expected_revision: Option<u64>) -> Result<AppSnapshot, String> {
+    let runtime = app.state::<Runtime>();
+    let result = runtime.dispatch(action, expected_revision);
+    // Rejected actions may still have settled pending input or crossed a clock boundary.
+    if let Ok(snapshot) = runtime.snapshot() { let _ = app.emit("app-state", snapshot); }
+    if let Ok(counts) = runtime.input_counts() { let _ = app.emit("input-counts", counts); }
+    let snapshot = result?;
+    if snapshot.pets.values().all(|pet| !pet.present) {
+        runtime.shutdown();
+        app.exit(0);
+    }
+    Ok(snapshot)
+}
+#[tauri::command]
+fn quit_pets(app: tauri::AppHandle) -> Result<(), String> {
+    let runtime = app.state::<Runtime>();
+    runtime.save_before_exit()?;
+    runtime.shutdown();
+    app.exit(0);
     Ok(())
 }
-
-fn mark_pair_split(owner: &mut Option<String>, sleeps: &mut std::collections::HashMap<String, bool>, owner_label: &str, other_label: &str) -> bool {
-    if owner.as_deref() != Some(owner_label) { return false; }
-    sleeps.insert(owner_label.to_string(), false);
-    sleeps.insert(other_label.to_string(), false);
-    *owner = None;
-    true
+#[tauri::command]
+fn request_input_access(app: tauri::AppHandle) -> Result<AppSnapshot, String> {
+    let runtime = app.state::<Runtime>();
+    runtime.request_access();
+    let snapshot = runtime.snapshot()?;
+    let _ = app.emit("app-state", &snapshot);
+    Ok(snapshot)
 }
-
-fn join_outcome(owner: Option<&str>, sleeps: &std::collections::HashMap<String, bool>, label: &str, other: &str, expected_sleeping: bool) -> Option<bool> {
-    if owner.is_some() || sleeps.get(label).copied().unwrap_or(false) != expected_sleeping { return None; }
-    Some(sleeps.get(other).copied().unwrap_or(false))
+#[tauri::command]
+async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    // WebView2 creation must not run inside a synchronous command handler.
+    static OPEN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = OPEN.lock().map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window("settings") {
+        window.show().map_err(|e| e.to_string())?;
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "settings", tauri::WebviewUrl::App("settings.html".into()))
+        .title("Dual Pet · 陪伴设置").inner_size(620.0, 760.0)
+        .min_inner_size(400.0, 480.0).resizable(true)
+        .build().map(|_| ()).map_err(|e| e.to_string())
 }
-
-fn commit_pair(owner: &mut Option<String>, sleeps: &mut std::collections::HashMap<String, bool>, label: &str, other: &str, sleeping: bool) {
-    sleeps.insert(label.to_string(), sleeping);
-    sleeps.insert(other.to_string(), sleeping);
-    *owner = Some(label.to_string());
+#[tauri::command]
+async fn open_counter(app: tauri::AppHandle) -> Result<(), String> {
+    static OPEN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = OPEN.lock().map_err(|e| e.to_string())?;
+    // One read-only view of the shared collector; never start another runtime.
+    if let Some(window) = app.get_webview_window("counter") {
+        return window.show().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "counter", tauri::WebviewUrl::App("counter.html".into()))
+        .title("Dual Pet · 今日操作").inner_size(360.0, 400.0)
+        .min_inner_size(320.0, 360.0).resizable(true)
+        .focused(false).always_on_top(true)
+        .build().map(|_| ()).map_err(|e| e.to_string())
 }
-
 #[tauri::command]
 fn report_pet_status(window: tauri::WebviewWindow, status: String) {
     eprintln!("[dual-pet:{}] {}", window.label(), status);
 }
-
 #[tauri::command]
-fn show_pet_menu(window: tauri::WebviewWindow, paired: bool, sleeping: bool, ready: bool, scale: f64) -> Result<(), String> {
+fn show_pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle, ready: bool, scale: f64) -> Result<(), String> {
     use tauri::menu::{Menu, MenuItem, IsMenuItem};
-    let title = if paired { "陈子奚与江晏" } else if window.label() == "pet-a" { "陈子奚" } else { "江晏" };
-    let mut specs = vec![("title", title, false), ("grow", "放大", ready && scale < 4.0), ("shrink", "缩小", ready && scale > 0.55), ("reset", "恢复默认大小", ready)];
+    let snapshot = app.state::<Runtime>().snapshot()?;
+    let id = match window.label() { "pet-a" => PetId::A, "pet-b" => PetId::B, _ => return Err("not a pet window".into()) };
+    let paired = snapshot.pair.as_ref().is_some_and(|pair| pair.owner == id);
+    let sleeping = snapshot.pets[&id].activity == Activity::Sleeping;
+    let locked = paired && snapshot.dialogue.as_ref().is_some_and(|dialogue| dialogue.kind != "break-reminder");
+    let title = if paired { "陈子奚与江晏" } else if id == PetId::A { "陈子奚" } else { "江晏" };
+    let mut specs = vec![("title", title, false), ("settings", "陪伴设置与成长进度", true), ("counter", "今日操作计数面板", true),
+        ("grow", "放大", ready && !locked && scale < 4.0), ("shrink", "缩小", ready && !locked && scale > 0.55), ("reset", "恢复默认大小", ready && !locked),
+        ("stand", "站立陪伴", ready), ("work", "工作陪伴", ready),
+        ("sleep", if sleeping { "醒来" } else { "睡觉" }, ready)];
     if paired {
-        specs.push(("sleep", if sleeping { "醒来" } else { "双人睡眠" }, ready));
-        specs.push(("split", "拆开两人", ready));
+        specs.extend([("split", "拆开两人", ready && !locked), ("close-a", "关闭陈子奚", ready), ("close-b", "关闭江晏", ready)]);
+    } else {
+        specs.push(("close", "关闭当前角色", ready));
+        if !snapshot.pets[&id.other()].present { specs.push(("summon", "呼唤另一人", ready)); }
     }
-    else { specs.push(("sleep", if sleeping { "醒来" } else { "睡觉" }, ready)); }
     specs.push(("quit", "退出桌宠（两人）", true));
-    let items: Vec<MenuItem<tauri::Wry>> = specs.into_iter().map(|(id, text, enabled)| {
-        MenuItem::with_id(&window, format!("{}:{}", window.label(), id), text, enabled, None::<&str>)
+    let items: Vec<MenuItem<tauri::Wry>> = specs.into_iter().map(|(action, text, enabled)| {
+        MenuItem::with_id(&window, format!("{}:{}", window.label(), action), text, enabled, None::<&str>)
     }).collect::<Result<_, _>>().map_err(|e| e.to_string())?;
-    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn IsMenuItem<tauri::Wry>).collect();
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|item| item as &dyn IsMenuItem<tauri::Wry>).collect();
     let menu = Menu::with_items(&window, &refs).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .manage(PairState::default())
-        .manage(SleepState::default())
-        .invoke_handler(tauri::generate_handler![quit_pets, report_pet_status, set_sleeping, join_pair, split_pair, show_pet_menu])
+    let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![get_app_state, get_input_counts, get_input_health, get_double_click_interval, dispatch_action, request_input_access, open_settings, open_counter, quit_pets, report_pet_status, show_pet_menu])
         .setup(|app| {
+            let path = app.path().app_data_dir()?.join("state-v3.json");
+            let runtime = Runtime::new(path).map_err(std::io::Error::other)?;
+            app.manage(runtime);
             #[cfg(target_os = "macos")]
             if let Err(error) = macos::setup(app) {
-                eprintln!("[dual-pet] macOS menu-bar setup failed; continuing with Regular activation policy: {error}");
+                eprintln!("[dual-pet] macOS menu-bar setup failed: {error}");
             }
+            // Exactly one application-level clock. Webviews only render snapshots.
+            let handle = app.handle().clone();
+            std::thread::Builder::new().name("pet-state-clock".into()).spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(32));
+                    let runtime = handle.state::<Runtime>();
+                    if runtime.is_stopped() { break; }
+                    match runtime.pulse() {
+                        Ok(pulse) => {
+                            if let Some(snapshot) = pulse.snapshot { let _ = handle.emit("app-state", snapshot); }
+                            if let Some(counts) = pulse.counts { let _ = handle.emit("input-counts", counts); }
+                        }
+                        Err(error) => eprintln!("[dual-pet] state clock: {error}"),
+                    }
+                }
+            })?;
             Ok(())
         })
         .on_menu_event(|app, event| {
-            use tauri::{Manager, Emitter};
             if let Some((label, action)) = event.id().as_ref().split_once(':') {
-                if action == "quit" { app.exit(0); return; }
-                if let Some(window) = app.get_webview_window(label) { let _ = window.emit("pet-menu-action", action); }
-            }
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{join_outcome, commit_pair, mark_pair_split};
-    use std::collections::HashMap;
-
-    #[test]
-    fn all_sleep_combinations_follow_stationary_pet_in_both_directions() {
-        for (label, other) in [("pet-a", "pet-b"), ("pet-b", "pet-a")] {
-            for dragged in [false, true] {
-                for stationary in [false, true] {
-                    let mut owner = None;
-                    let mut sleeps = HashMap::from([(label.to_string(), dragged), (other.to_string(), stationary)]);
-                    assert_eq!(join_outcome(owner.as_deref(), &sleeps, label, other, dragged), Some(stationary));
-                    commit_pair(&mut owner, &mut sleeps, label, other, stationary);
-                    assert_eq!(owner.as_deref(), Some(label));
-                    assert_eq!(sleeps[label], stationary);
-                    assert_eq!(sleeps[other], stationary);
-                    assert_eq!(join_outcome(owner.as_deref(), &sleeps, other, label, stationary), None);
-                    assert!(!mark_pair_split(&mut owner, &mut sleeps, other, label));
-                    assert_eq!(owner.as_deref(), Some(label));
-                    assert!(mark_pair_split(&mut owner, &mut sleeps, label, other));
-                    assert_eq!(owner, None);
-                    assert!(!sleeps[label] && !sleeps[other]);
+                if matches!(label, "pet-a" | "pet-b") {
+                    // `window.emit` delegates to manager.emit in Tauri 2.11.5 and
+                    // therefore broadcasts. Target the webview explicitly so only
+                    // the menu's source window can execute the action.
+                    let pet = match action {
+                        "close-a" => "pet-a",
+                        "close-b" => "pet-b",
+                        _ => label,
+                    };
+                    let payload = PetMenuAction {
+                        action: action.into(), target_window: label.into(), pet: pet.into(),
+                    };
+                    let _ = app.emit_to(EventTarget::webview_window(label), "pet-menu-action", payload);
                 }
             }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|app, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            let runtime = app.state::<Runtime>();
+            if !runtime.is_stopped() {
+                if let Err(error) = runtime.save_before_exit() {
+                    api.prevent_exit();
+                    eprintln!("[dual-pet] exit cancelled: {error}");
+                    if let Ok(snapshot) = runtime.snapshot() { let _ = app.emit("app-state", snapshot); }
+                } else { runtime.shutdown(); }
+            }
         }
-    }
-
-    #[test]
-    fn stale_sleep_request_is_rejected_without_mutation() {
-        let sleeps = HashMap::from([("pet-a".to_string(), true)]);
-        assert_eq!(join_outcome(None, &sleeps, "pet-a", "pet-b", false), None);
-        assert!(sleeps["pet-a"]);
-    }
-
-    #[test]
-    fn absent_sleep_state_defaults_to_awake() {
-        assert_eq!(join_outcome(None, &HashMap::new(), "pet-a", "pet-b", false), Some(false));
-    }
+    });
 }

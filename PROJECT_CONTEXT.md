@@ -6,19 +6,19 @@ Dual Pet 是一个支持 Windows 和 macOS 的双角色桌面宠物应用，由 
 
 ## 当前状态
 
-- 当前版本：`0.2.0`
+- 当前版本：`0.3.0` 阶段开发版，待用户真机／美术验收；详细状态见 `docs/V03_STAGE_HANDOFF.md`
 - 当前平台：Windows 10/11 x64；Intel macOS 13.0+
 - 一期历史分支：Windows `main`；macOS `mac-dev`
 - 双平台整合分支：`codex/v0.3-baseline`，作为后续功能的统一开发基线
 - macOS 实际验收见 `MACOS_TESTING.md`
 - 浏览器预览和旧引擎已移除
-- 床与睡眠拖动、自动合床已实现，2026-09-12 用户确认基础表现测试通过；定时睡眠尚未实现
+- 阶段 0 双平台验收已完成；v0.3 已接入独立在场／成长、番茄钟、固定作息、输入计数、面对面／合桌、设置与存档，尚不能把旧版验收视为本轮新功能验收
 
 ## 架构
 
-- `src/`：TypeScript 界面、角色状态与窗口交互
+- `src/`：TypeScript 快照展示、角色渲染与窗口交互，不运行成长或业务计时器
 - `public/assets/`：两个角色的动画和配置资源
-- `src-tauri/`：Tauri/Rust 桌面窗口、系统交互与打包配置
+- `src-tauri/`：Tauri/Rust 唯一应用核心、输入计数、作息／番茄钟、成长／存档及打包配置
 - `index.html`：桌面应用内嵌界面入口
 
 `dist/`、`src-tauri/target/`、`app/`、`installer/` 和 `work/` 是生成或分发目录，不作为源代码同步。
@@ -42,6 +42,6 @@ Dual Pet 是一个支持 Windows 和 macOS 的双角色桌面宠物应用，由 
 - 透明支持开关与 Rust feature 匹配；平台窗口与打包属性放在 `tauri.macos.conf.json` / `tauri.windows.conf.json`。
 - Mac 将窗口、光标、显示器工作区分别按对应 DPI 归一到全局逻辑坐标；Windows 保持物理坐标。
 - Canvas 缓存包括 DPR；显示器变化和找回操作保持当前状态。
-- 一期缩放只在当前运行期间生效；下一阶段的养成数据将使用带版本的统一存档。
+- 缩放只在当前运行期间生效；v0.3 成长及设置使用应用数据目录下版本化 `state-v3.json` 和有效备份。
 - 本机自用 ad-hoc 签名，无公证、公开发布或自动更新。
 - `npm test` 包含真实前端控制器的模拟原生适配器测试；不能替代 WKWebView、外接屏和 Windows 人工回归。

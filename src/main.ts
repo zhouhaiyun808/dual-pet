@@ -46,8 +46,9 @@ app.innerHTML = `
   <div class="pet-shell">
     <div class="pet" id="pet">
       <canvas id="pet-image" aria-label="${profile.config.name}"></canvas>
-      
     </div>
+    <div id="pet-status" class="pet-status" hidden role="status"></div>
+    <div id="dialogue-bubble" class="dialogue-bubble" hidden aria-live="polite"></div>
   </div>
 `;
 
@@ -71,6 +72,4 @@ try {
   await getCurrentWindow().show().catch(console.error);
 }
 window.addEventListener('beforeunload', () => pet.destroy(), { once: true });
-
-
 

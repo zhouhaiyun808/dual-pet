@@ -52,8 +52,21 @@ export function loadSprite(url: string): Promise<Sprite> {
   return cache.get(url)!;
 }
 export function getStaticFrame(id: string, name: string) {
+  if (name === 'face-left' || name === 'face-right') {
+    const direction = getWalkAssetDirection(id, name === 'face-left' ? 'left' : 'right');
+    return `/assets/${id}/walk-${direction}/01.png`;
+  }
   if (id === 'pet-b' && name.startsWith('kiss-')) name = name === 'kiss-left' ? 'kiss-right' : 'kiss-left';
   return `/assets/${id}/${name}.png`;
+}
+
+// New approved spritesheets use a fixed canvas. Never strip disconnected props
+// or crop individual animation frames with the legacy sprite repair pipeline.
+export async function loadFixedSprite(url: string): Promise<Sprite> {
+  const image = new Image(); image.src = url; await image.decode();
+  const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+  canvas.getContext('2d')!.drawImage(image, 0, 0);
+  return { image: canvas, x: 0, y: 0, width: image.width, height: image.height };
 }
 export function getBedFrame(color: 'green' | 'blue', paired: boolean) {
   return `/assets/beds/${color}-${paired ? 'double' : 'single'}.png`;
@@ -68,4 +81,3 @@ export async function getWalkFrames(id: string, direction: Direction): Promise<s
   const frames = Array.from({ length: id === 'pet-a' ? 7 : 4 }, (_, i) => `/assets/${id}/walk-${assetDirection}/${String(i + 1).padStart(2, '0')}.png`);
   await Promise.all(frames.map(loadSprite)); return frames;
 }
-

@@ -1,0 +1,61 @@
+name: Windows test package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-test:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Prepare Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup target add x86_64-pc-windows-msvc
+          exit $LASTEXITCODE
+      - run: npm ci
+      - run: npm run build
+      - name: Frontend logic tests (no window tester)
+        run: npm run test:ui-logic
+      - name: Backend logic tests
+        run: npm run test:logic
+      - name: Build Windows x64 installer
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis
+      - name: Prepare test download
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path windows-test-package -Force | Out-Null
+          $installers = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe)
+          if ($installers.Count -eq 0) { throw 'Windows installer not found' }
+          $installers | Copy-Item -Destination windows-test-package
+          Copy-Item docs/V03_WINDOWS_DOWNLOAD.md windows-test-package/README.md
+          Copy-Item docs/V03_MANUAL_TESTS.md,docs/V03_COUNTER_MANUAL_TESTS.md windows-test-package
+          Get-ChildItem windows-test-package/*.exe | ForEach-Object {
+            $hash = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($_.Name)"
+          } | Set-Content windows-test-package/SHA256SUMS.txt
+      - name: Upload Windows test package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dual-pet-windows-x64-test
+          path: windows-test-package/
+          if-no-files-found: error
+          retention-days: 14

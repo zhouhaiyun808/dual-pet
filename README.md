@@ -2,6 +2,10 @@
 
 双角色桌面宠物应用。
 
+> 当前工作区为 **v0.3 阶段开发版**，不是已验收发布版。新增功能、试用方式与已知问题见 [阶段交接](docs/V03_STAGE_HANDOFF.md)，真机用例见 [验收单](docs/V03_MANUAL_TESTS.md)。本轮 agent 仅执行逻辑测试与编译；正式工作美术暂停，等待用户确认。
+>
+> 下方“功能”保留一期历史说明；v0.3 的亲亲／双人床需要共同解锁，拆分按状态规则恢复，并已接入定时睡眠。当前测试请用 `npm run test:logic`，不要把旧 `npm test` 窗口测试器作为验收。
+
 > Windows 和 macOS 一期已经完成；`main` 与 `mac-dev` 分别保留一期历史，后续功能在统一双平台基线上开发。
 >
 > Mac 首版面向 Intel / macOS 13 及以上，本机验收环境为 macOS 13.7.6。实际验证结果和未验证项目见 [MACOS_TESTING.md](MACOS_TESTING.md)。

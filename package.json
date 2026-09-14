@@ -1,11 +1,14 @@
 {
   "name": "dual-pet",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
     "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "test:logic": "cargo test --locked --manifest-path src-tauri/Cargo.toml --lib state:: && cargo test --locked --manifest-path src-tauri/Cargo.toml --lib store:: && cargo test --locked --manifest-path src-tauri/Cargo.toml --lib input:: && cargo test --locked --manifest-path src-tauri/Cargo.toml --lib runtime::",
+    "test:ui-logic": "node --experimental-strip-types --test tests/window-geometry.test.ts tests/live-counts.test.ts tests/counter-logic.test.ts tests/growth-details.test.ts tests/preview-data.test.ts",
+    "preview:browser": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/build.mjs",
