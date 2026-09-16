@@ -128,9 +128,6 @@ export class WindowPet {
         const url = getWorkFrameUrl(scene, frame);
         this.workSprites.set(url, await loadWorkFrameSprite(scene, frame));
       })));
-    this.doubleClickDelayMs = normalizeDoubleClickDelay(await invoke<number | null>('get_double_click_interval').catch(error => {
-      console.error(error); return null;
-    }));
     this.referenceHeight = this.sprites.get(this.walks.get('down')![this.profile.config.id === 'pet-a' ? 2 : 0])!.height;
     this.installEvents(); this.ready = true;
     const snapshot = await invoke<AppSnapshot>('get_app_state');
@@ -263,7 +260,7 @@ export class WindowPet {
     if (this.working) {
       const scene = sceneForPet(this.profile.config.id, this.paired);
       const sprite = this.workSprites.get(getWorkFrameUrl(scene, 'idle'));
-      const workHeight = Math.ceil(height * 1.4);
+      const workHeight = Math.ceil(height);
       const aspect = sprite ? sprite.width / sprite.height : this.paired ? 2.08 : 1.14;
       return { width: Math.ceil(workHeight * aspect), height: workHeight };
     }
@@ -615,6 +612,11 @@ export class WindowPet {
       if (event.type === 'pointerup' && drag.moved && drag.initialized) await updateDrag(drag, event, ++drag.positionRequest);
       this.pointer = null; this.pet.classList.remove('dragging');
       if (this.pet.hasPointerCapture(event.pointerId)) this.pet.releasePointerCapture(event.pointerId);
+      // A stationary click does not need to wait for window geometry IPC.
+      if (!drag.moved) {
+        if (gestureFinishAction(event.type as 'pointerup' | 'pointercancel' | 'lostpointercapture', false, drag.gestureToken, this.gestureGeneration) === 'single-click') this.scheduleSingleClick();
+        return;
+      }
       await drag.positionWork;
       await this.moving; await this.layoutWork; this.paint(performance.now());
       await this.keepInWorkArea();

@@ -1,13 +1,11 @@
 import type { Activity, AppSnapshot, PairMode, PetId } from './app-state';
 
-export const DOUBLE_CLICK_TOLERANCE_MS = 30;
-export const FALLBACK_DOUBLE_CLICK_INTERVAL_MS = 500;
+export const DOUBLE_CLICK_TOLERANCE_MS = 0;
+export const FALLBACK_DOUBLE_CLICK_INTERVAL_MS = 180;
 
 export function normalizeDoubleClickDelay(intervalMs: number | null | undefined): number {
-  const interval = typeof intervalMs === 'number' && Number.isFinite(intervalMs) && intervalMs > 0
-    ? intervalMs
-    : FALLBACK_DOUBLE_CLICK_INTERVAL_MS;
-  return Math.ceil(interval) + DOUBLE_CLICK_TOLERANCE_MS;
+  // Fixed trial window, independent of the OS's often much longer setting.
+  return FALLBACK_DOUBLE_CLICK_INTERVAL_MS;
 }
 
 export function nextSinglePetActivity(activity: Activity): Activity {

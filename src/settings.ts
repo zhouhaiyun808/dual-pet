@@ -7,94 +7,118 @@ import { acceptCounts, displayedCounts, inputStatusText, type InputCounts } from
 import { dailyEarningsBreakdown, formatDailyEarnings, formatDailySourceEarnings } from './growth-details';
 import { isCounterPreview } from './counter-logic';
 import { connectPreview } from './preview-bridge';
-import { getWorkSceneUrl, loadBoundedSprite, type WorkScene } from './assets';
-import { paintWorkScene } from './work-scene';
+import { renderPixelTime } from './pixel-time';
+import { loadSprite } from './assets';
 import './settings.css';
 
 const root = document.querySelector<HTMLElement>('#settings-app')!;
 const hasTauri = '__TAURI_INTERNALS__' in window;
 const preview = isCounterPreview(hasTauri, location.search);
+const petIds: PetId[] = ['pet-a', 'pet-b'];
 let stopPreview: (() => void) | undefined;
 root.innerHTML = `
-  <header><div><p class="eyebrow">DUAL PET / 同行日常</p><h1>一起，慢慢来</h1><p class="hint">专注有伴，休息有时。</p></div><span class="badge">v0.3 · 个人陪伴</span></header>
+  <header class="settings-header">
+    <div class="header-copy">
+      <p class="eyebrow">DUAL PET / 同行日常</p>
+      <div class="header-title"><h1>同行</h1></div>
+      <p class="hint">专注有伴，休息有时。</p>
+    </div>
+    <span class="badge">v0.3 · 个人陪伴</span>
+    <div class="identity-pair" aria-hidden="true">
+      <span class="identity-mark identity-chen"><img src="/assets/ui/chen-pine.png" alt=""><img src="/assets/ui/chen-jade.png" alt=""></span>
+      <span class="identity-divider"></span>
+      <span class="identity-mark identity-jiang"><img src="/assets/ui/jiang-bamboo.png" alt=""><img src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>
+    </div>
+  </header>
+  <nav class="settings-tabs" role="tablist" aria-label="同行页面">
+    <button class="settings-tab" id="tab-companion" role="tab" aria-selected="false" aria-controls="panel-companion" tabindex="-1" data-tab="companion">陪伴</button>
+    <button class="settings-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="panel-focus" tabindex="0" data-tab="focus">专注</button>
+    <button class="settings-tab" id="tab-growth" role="tab" aria-selected="false" aria-controls="panel-growth" tabindex="-1" data-tab="growth">成长</button>
+    <button class="settings-tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings">设置</button>
+  </nav>
   <div id="error" class="error" role="alert" hidden></div>
-  <div id="storage-warning" class="error" role="status" hidden></div>
-  <div class="section-head"><p id="connection" class="hint">正在读取陪伴状态…</p><button id="refresh" type="button">刷新状态</button></div>
-  <section class="card" aria-labelledby="focus-heading">
-    <div class="section-head"><h2 id="focus-heading">一段专注</h2><span id="phase" class="badge">等待连接</span></div>
-    <div class="timer"><div><p class="time" id="remaining">—:—</p><p id="rounds" class="hint">两人共用一个番茄钟</p></div>
-      <div class="actions"><button class="primary" data-action="pomodoro-start" disabled>开始专注</button><button data-action="pomodoro-pause" disabled>暂停</button><button data-action="pomodoro-resume" disabled hidden>继续</button><button data-action="pomodoro-stop" disabled>结束</button></div>
-    </div>
-    <div class="fields">
-      <label class="field">专注 · 5–120 分钟<input type="number" min="5" max="120" step="1" data-setting="focusMinutes" placeholder="25" disabled></label>
-      <label class="field">短休息 · 1–60 分钟<input type="number" min="1" max="60" step="1" data-setting="breakMinutes" placeholder="5" disabled></label>
-      <label class="field">长休息 · 1–60 分钟<input type="number" min="1" max="60" step="1" data-setting="longBreakMinutes" placeholder="15" disabled></label>
-    </div>
-    <div class="checks"><label class="check"><input type="checkbox" data-setting="autoNext" disabled>休息后自动下一轮</label><label class="check"><input type="checkbox" data-setting="longBreakEnabled" disabled>每 4 轮长休息</label></div>
-    <p class="hint" style="margin-top:12px">休息时站立，泡泡提醒起身活动。默认 25 / 5 / 15 分钟。</p>
+  <section class="tab-panel" id="panel-companion" role="tabpanel" aria-labelledby="tab-companion" data-panel="companion" hidden>
+    <section class="card" aria-labelledby="dialogue-heading">
+      <div class="section-head"><h2 id="dialogue-heading" class="ornament-heading">片语收藏</h2></div>
+      <p id="collection-count" class="hint">原作短句，保留出处与原场景。</p><div class="catalogue" id="catalogue"></div>
+    </section>
   </section>
-  <section class="card" aria-labelledby="sleep-heading">
-    <div class="section-head"><h2 id="sleep-heading">按时安寝</h2><span id="sleep-status" class="hint">—</span></div>
-    <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="lunchEnabled" disabled>午休</label><span>12:30 – 14:00</span></div>
-    <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="nightEnabled" disabled>夜间睡眠</label><span>22:00 – 次日 08:00</span></div>
-    <div class="schedule-row"><span class="hint">按电脑本地时间；醒来后手动继续专注。</span><button data-action="skip-sleep" disabled>跳过当前睡眠时段</button></div>
+  <section class="tab-panel" id="panel-focus" role="tabpanel" aria-labelledby="tab-focus" data-panel="focus">
+    <section class="card focus-card" aria-labelledby="focus-heading">
+      <div class="section-head"><h2 id="focus-heading" class="ornament-heading">一段专注</h2><span id="phase" class="badge">等待连接</span></div>
+      <div class="timer"><div><p class="time" id="remaining">—:—</p><p id="rounds" class="hint">两人共用一个番茄钟</p></div>
+        <progress class="focus-progress" id="focus-progress" max="1500" value="0" aria-label="当前专注进度"></progress>
+        <div class="actions"><button class="primary" data-action="pomodoro-start" disabled>开始专注</button><button data-action="pomodoro-pause" disabled>暂停</button><button data-action="pomodoro-resume" disabled hidden>继续</button><button data-action="pomodoro-stop" disabled>结束</button></div>
+      </div>
+    </section>
+    <section class="card companion-card" aria-labelledby="companion-heading">
+      <span class="companion-decoration chen" aria-hidden="true"><img class="pine" src="/assets/ui/chen-pine.png" alt=""><img class="jade" src="/assets/ui/chen-jade.png" alt=""></span>
+      <span class="companion-decoration jiang" aria-hidden="true"><img class="bamboo" src="/assets/ui/jiang-bamboo.png" alt=""><img class="swallow" src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>
+      <div class="section-head"><h2 id="companion-heading" class="ornament-heading">今日陪伴</h2></div>
+      <div class="companion-grid" id="companions"></div>
+    </section>
+    <section class="card input-card" aria-labelledby="input-heading">
+      <div class="section-head"><h2 id="input-heading" class="ornament-heading">今日输入</h2></div>
+      <div class="input-grid" id="input-summary"></div>
+      <p id="input-status" class="input-status">等待输入统计状态…</p>
+    </section>
   </section>
-  <section class="card" aria-labelledby="pets-heading">
-    <div class="section-head"><h2 id="pets-heading">两人的同行录</h2><span id="stage" class="badge">阶段 —</span></div>
-    <p id="unlock-summary" class="hint" style="margin-bottom:14px">两人各自成长，双方达标后共同解锁。</p>
-    <div class="pet-grid" id="pets"></div>
-    <p class="notice">离场保留进度并暂停收益；组合中隐藏的伙伴仍在场。呼唤不会补算离场收益。</p>
+  <section class="tab-panel" id="panel-growth" role="tabpanel" aria-labelledby="tab-growth" data-panel="growth" hidden>
+    <section class="card" aria-labelledby="growth-heading">
+      <div class="section-head"><h2 id="growth-heading" class="ornament-heading">两人的同行录</h2><span id="growth-stage" class="badge">阶段 —</span></div>
+      <p id="growth-unlock-summary" class="hint" style="margin-bottom:14px">两人各自成长，双方达标后共同解锁。</p>
+      <div class="pet-grid" id="pets"></div>
+      <p class="notice">亲密度、里程碑与每日收益都按角色分别记录；离场期间不会补算收益。</p>
+    </section>
   </section>
-  <section class="card" aria-labelledby="input-heading">
-    <div class="section-head"><h2 id="input-heading">把日常变成陪伴</h2><div class="actions"><button id="open-counter" type="button">打开桌面计数面板</button><label class="check"><input type="checkbox" data-setting="inputEnabled" disabled>键鼠计数</label></div></div>
-    <p id="input-status">等待输入统计状态…</p>
-    <p class="hint">操作次数与今日收益是两组不同数据：次数约每 32 毫秒一批实时更新，收益以状态中的实际结算为准；旧的今日次数不代表监听正在运行。分类金额四舍五入到两位小数，总额显示一位小数。</p>
-    <p id="input-health" class="hint"></p>
-    <p class="hint" style="margin:8px 0 12px">仅累计按键次数与鼠标左、中、右键点击；不记录文字、位置或正在使用的软件。长按重复、移动和滚轮不计。</p>
-    <button id="input-access" type="button" disabled>申请或检查输入监控权限</button>
-    <p class="hint" style="margin-top:8px">仅在你点击后请求权限；未授权仍可放置成长。授权后可刷新状态。</p>
-  </section>
-  <section class="card" aria-labelledby="dialogue-heading">
-    <div class="section-head"><h2 id="dialogue-heading">片语收藏</h2><label class="check"><input type="checkbox" data-setting="bubblesEnabled" disabled>对话泡泡</label></div>
-    <p id="collection-count" class="hint">原作短句，保留出处与原场景。</p><div class="catalogue" id="catalogue"></div>
-  </section>
-  <section class="card" aria-labelledby="art-heading">
-    <div class="section-head"><h2 id="art-heading">工作动画关键帧</h2><span class="badge">已接入</span></div>
-    <div class="work-preview-grid" aria-label="三种工作母帧预览">
-      <figure class="work-preview work-preview-dual"><canvas data-work-scene="dual-jiangchen" aria-label="陈子奚与江晏共同工作母帧"></canvas><figcaption>共同工作母帧</figcaption></figure>
-      <figure class="work-preview"><canvas data-work-scene="solo-chen" aria-label="陈子奚单人工作母帧"></canvas><figcaption>陈子奚 · 母帧</figcaption></figure>
-      <figure class="work-preview"><canvas data-work-scene="solo-jiang" aria-label="江晏单人工作母帧"></canvas><figcaption>江晏 · 母帧</figcaption></figure>
-    </div>
-    <p id="art-load-error" class="hint" hidden>工作循环预览暂不可用；桌宠仍会在素材成功加载后显示。</p>
-    <p class="hint">工作状态现已使用独立透明 PNG 播放眨眼、落笔和合书动作；设置页保留静态母帧方便核对画面。</p>
-    <div class="actions" style="margin-top:10px"><a href="/assets/work-frames/dual-jiangchen/00-idle.png" target="_blank" rel="noopener noreferrer">查看双人母帧 ↗</a><a href="/assets/work-frames/README.md" target="_blank" rel="noopener noreferrer">查看美术说明 ↗</a></div>
+  <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
+    <section class="card" aria-labelledby="sleep-heading">
+      <div class="section-head"><h2 id="sleep-heading" class="ornament-heading">按时安寝</h2><span id="sleep-status" class="hint">—</span></div>
+      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="lunchEnabled" disabled>午休</label><span>12:30 – 14:00</span></div>
+      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="nightEnabled" disabled>夜间睡眠</label><span>22:00 – 次日 08:00</span></div>
+      <div class="schedule-row"><span class="hint">按电脑本地时间；醒来后手动继续专注。</span><button data-action="skip-sleep" disabled>跳过当前睡眠时段</button></div>
+    </section>
+    <section class="card" aria-labelledby="focus-settings-heading">
+      <div class="section-head"><h2 id="focus-settings-heading" class="ornament-heading">专注设置</h2></div>
+      <div class="fields">
+        <label class="field">专注 · 5–120 分钟<input type="number" min="5" max="120" step="1" data-setting="focusMinutes" placeholder="25" disabled></label>
+        <label class="field">短休息 · 1–60 分钟<input type="number" min="1" max="60" step="1" data-setting="breakMinutes" placeholder="5" disabled></label>
+        <label class="field">长休息 · 1–60 分钟<input type="number" min="1" max="60" step="1" data-setting="longBreakMinutes" placeholder="15" disabled></label>
+      </div>
+      <div class="checks"><label class="check"><input type="checkbox" data-setting="autoNext" disabled>休息后自动下一轮</label><label class="check"><input type="checkbox" data-setting="longBreakEnabled" disabled>每 4 轮长休息</label></div>
+      <p class="hint" style="margin-top:12px">休息时站立，泡泡提醒起身活动。默认 25 / 5 / 15 分钟。</p>
+    </section>
+    <section class="card" aria-labelledby="feature-settings-heading">
+      <div class="section-head"><h2 id="feature-settings-heading" class="ornament-heading">功能设置</h2></div>
+      <div class="checks"><label class="check"><input type="checkbox" data-setting="inputEnabled" disabled>键鼠计数</label><label class="check"><input type="checkbox" data-setting="bubblesEnabled" disabled>对话泡泡</label></div>
+      <p id="input-health" class="hint"></p>
+      <div class="actions settings-actions"><button id="open-counter" type="button">打开桌面计数面板</button><button id="input-access" type="button" disabled>申请或检查输入监控权限</button></div>
+      <p class="hint" style="margin-top:8px">仅累计按键次数与鼠标左、中、右键点击；不记录文字、位置或正在使用的软件。未授权仍可放置成长。</p>
+    </section>
+    <section class="card" aria-labelledby="connection-heading">
+      <div class="section-head"><h2 id="connection-heading" class="ornament-heading">状态连接</h2><button id="refresh" type="button">刷新状态</button></div>
+      <p id="connection" class="hint">正在读取陪伴状态…</p>
+      <div id="storage-warning" class="error" role="status" hidden></div>
+      <p class="hint">设置草稿只在点击保存后写入本地记录；实时状态和计时器不会因为切换页签而重置。</p>
+    </section>
   </section>
   <div class="savebar"><p id="draft-status" class="hint" role="status">设置读取中…</p><div class="actions"><button id="discard" disabled>撤销草稿</button><button id="save" class="primary" disabled>保存设置</button></div></div>
   <footer>本地记录 · 各自成长 · 一起同行</footer>
 `;
 
+const frameCorners = ['tl', 'tr', 'br', 'bl'] as const;
+for (const card of root.querySelectorAll<HTMLElement>('.card')) {
+  for (const corner of frameCorners) {
+    const ornament = document.createElement('span');
+    ornament.className = `frame-corner frame-corner-${corner}`;
+    ornament.setAttribute('aria-hidden', 'true');
+    card.append(ornament);
+  }
+}
+
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
-async function startWorkPreviews(): Promise<void> {
-  const canvases = Array.from(root.querySelectorAll<HTMLCanvasElement>('[data-work-scene]'));
-  const previews = await Promise.all(canvases.map(async canvas => {
-    const scene = canvas.dataset.workScene as WorkScene;
-    return { canvas, scene, sprite: await loadBoundedSprite(getWorkSceneUrl(scene)) };
-  }));
-  const dpi = window.devicePixelRatio || 1;
-  for (const { canvas, scene, sprite } of previews) {
-    const width = Math.max(1, Math.round(canvas.clientWidth));
-    const height = Math.max(1, Math.round(width * sprite.height / sprite.width));
-    canvas.style.aspectRatio = `${sprite.width} / ${sprite.height}`;
-    canvas.width = Math.round(width * dpi); canvas.height = Math.round(height * dpi);
-    const ctx = canvas.getContext('2d')!;
-    ctx.setTransform(dpi, 0, 0, dpi, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    paintWorkScene(ctx, width, height, scene, sprite);
-  }
-}
-void startWorkPreviews().catch(() => { element('art-load-error').hidden = false; });
 const controls = Array.from(root.querySelectorAll<HTMLInputElement>('[data-setting]'));
 const actionButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-action]'));
 let snapshot: AppSnapshot | null = null;
@@ -107,14 +131,74 @@ let disposed = false;
 const dirty = new Set<keyof Settings>();
 let catalogueKey = '';
 
-const petIds: PetId[] = ['pet-a', 'pet-b'];
 for (const id of petIds) {
   const card = document.createElement('article');
   card.className = 'pet';
+  card.dataset.petId = id;
   card.innerHTML = `<div class="section-head"><h3>${petNames[id]}</h3><span id="${id}-presence" class="badge">—</span></div><p><span id="${id}-score" class="score">—</span> <small>亲密度</small></p><p id="${id}-target" class="hint"></p><progress id="${id}-progress" max="1000" value="0" aria-label="${petNames[id]}成长进度"></progress><ul id="${id}-milestones" class="milestones"></ul><p id="${id}-stats" class="stats"></p><dl id="${id}-earnings" class="earnings" aria-label="${petNames[id]}每日收益分类"><div><dt>陪伴</dt><dd id="${id}-earning-companion">0.00</dd></div><div><dt>键盘</dt><dd id="${id}-earning-keyboard">0.00</dd></div><div><dt>点击</dt><dd id="${id}-earning-mouse">0.00</dd></div><div><dt>番茄钟</dt><dd id="${id}-earning-focus">0.00</dd></div><div><dt>未分类</dt><dd id="${id}-earning-unclassified">0.00</dd></div></dl><p class="hint earnings-note">陪伴含清醒与宠物睡眠基础收益；未分类是本版本前无法追溯来源的历史收益。</p><button id="${id}-summon" type="button" style="margin-top:12px" disabled>呼唤${petNames[id]}</button>`;
   element('pets').append(card);
   element(`${id}-summon`).addEventListener('click', () => void dispatch({ kind: 'summon', pet: id }));
 }
+
+for (const id of petIds) {
+  const card = document.createElement('article');
+  card.className = 'companion-pet';
+  card.dataset.petId = id;
+  card.innerHTML = `<img class="portrait" src="/assets/${id}/walk-down/01.png" alt="${petNames[id]}正面"><div class="companion-copy"><h3>${petNames[id]}</h3><p class="hint"><span id="${id}-companion-presence">—</span> · <span id="${id}-companion-activity">—</span></p><div class="hearts" id="${id}-hearts" role="meter" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-label="${petNames[id]}亲密度">${'<span class="heart" aria-hidden="true"></span>'.repeat(5)}</div><progress id="${id}-companion-progress" max="1000" value="0" aria-label="${petNames[id]}亲密度进度"></progress><p id="${id}-companion-summary" class="sr-only">亲密度 —</p></div>`;
+  element('companions').append(card);
+  const decoration = root.querySelector(`.companion-decoration.${id === 'pet-a' ? 'chen' : 'jiang'}`);
+  if (decoration) card.append(decoration);
+}
+
+for (const id of petIds) {
+  const card = document.createElement('article');
+  card.className = 'input-pet';
+  card.dataset.petId = id;
+  card.innerHTML = `<img class="portrait" src="/assets/${id}/walk-down/01.png" alt="${petNames[id]}正面"><div class="input-copy"><h3>${petNames[id]}</h3><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="${id}-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="${id}-summary-clicks">—</strong></div></div>`;
+  element('input-summary').append(card);
+}
+
+// Use the same sprite cleanup as the desktop pets. Export padding and sheet
+// borders must not shrink or offset the front-facing portraits in their slots.
+for (const portrait of root.querySelectorAll<HTMLImageElement>('.portrait')) {
+  void loadSprite(portrait.getAttribute('src')!).then(sprite => {
+    const canvas = document.createElement('canvas');
+    canvas.width = sprite.width; canvas.height = sprite.height;
+    canvas.getContext('2d')!.drawImage(sprite.image, sprite.x, sprite.y, sprite.width, sprite.height, 0, 0, sprite.width, sprite.height);
+    portrait.src = canvas.toDataURL();
+  }).catch(error => console.warn('Portrait cleanup unavailable', error));
+}
+
+type TabId = 'companion' | 'focus' | 'growth' | 'settings';
+let activeTab: TabId = 'focus';
+const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.settings-tab'));
+const panels = Array.from(root.querySelectorAll<HTMLElement>('.tab-panel'));
+function activateTab(next: TabId, moveFocus = false): void {
+  activeTab = next;
+  for (const tab of tabs) {
+    const selected = tab.dataset.tab === next;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of panels) panel.hidden = panel.dataset.panel !== next;
+  if (moveFocus) tabs.find(tab => tab.dataset.tab === next)?.focus();
+}
+for (const tab of tabs) {
+  tab.addEventListener('click', () => activateTab(tab.dataset.tab as TabId));
+  tab.addEventListener('keydown', event => {
+    const index = tabs.indexOf(tab);
+    let next = index;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else if (event.key === 'Enter' || event.key === ' ') { activateTab(tab.dataset.tab as TabId); return; }
+    else return;
+    event.preventDefault();
+    activateTab(tabs[next].dataset.tab as TabId, true);
+  });
+}
+activateTab(activeTab);
 
 function showError(message: string): void {
   element('error').textContent = message;
@@ -154,6 +238,8 @@ function renderCounters(): void {
     const counts = displayedCounts(snapshot, liveCounts, id);
     const earnings = dailyEarningsBreakdown(p);
     element(`${id}-stats`).textContent = `操作次数：按键 ${counts.todayKeys.toLocaleString()} · 点击 ${counts.todayClicks.toLocaleString()} · 今日收益：${formatDailyEarnings(earnings.cappedTotal)} / 800`;
+    element(`${id}-summary-keys`).textContent = counts.todayKeys.toLocaleString('zh-CN');
+    element(`${id}-summary-clicks`).textContent = counts.todayClicks.toLocaleString('zh-CN');
     for (const key of ['companion', 'keyboard', 'mouse', 'focus', 'unclassified'] as const) {
       element(`${id}-earning-${key}`).textContent = formatDailySourceEarnings(earnings[key]);
     }
@@ -204,7 +290,17 @@ function render(): void {
   const phases = { idle: '准备开始', focus: '专注中', break: '休息 · 起身活动', paused: '已暂停' };
   element('phase').textContent = phases[state.pomodoro.phase];
   const seconds = Math.max(0, Math.ceil(state.pomodoro.remainingSeconds));
-  element('remaining').textContent = state.pomodoro.phase === 'idle' ? '—:—' : `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  const timerPhase = state.pomodoro.phase === 'paused' ? state.pomodoro.resumePhase : state.pomodoro.phase;
+  const longBreak = timerPhase === 'break' && state.settings.longBreakEnabled && state.pomodoro.completedRounds > 0 && state.pomodoro.completedRounds % 4 === 0;
+  const configuredSeconds = (timerPhase === 'break'
+    ? (longBreak ? state.settings.longBreakMinutes : state.settings.breakMinutes)
+    : state.settings.focusMinutes) * 60;
+  const displaySeconds = state.pomodoro.phase === 'idle' ? configuredSeconds : seconds;
+  const timerText = `${String(Math.floor(displaySeconds / 60)).padStart(2, '0')}:${String(displaySeconds % 60).padStart(2, '0')}`;
+  renderPixelTime(element('remaining'), timerText);
+  const focusProgress = element<HTMLProgressElement>('focus-progress');
+  focusProgress.max = Math.max(1, configuredSeconds);
+  focusProgress.value = state.pomodoro.phase === 'idle' ? 0 : Math.min(configuredSeconds, Math.max(0, configuredSeconds - seconds));
   element('rounds').textContent = `已完成 ${state.pomodoro.completedRounds} 轮 · 两人共用`;
   for (const button of actionButtons) {
     const kind = button.dataset.action;
@@ -215,23 +311,44 @@ function render(): void {
       : kind === 'pomodoro-resume' ? phase === 'paused' && !state.sleepSlot
       : phase !== 'idle';
     button.disabled = busy || !permitted;
-    if (kind === 'pomodoro-pause') button.hidden = phase === 'paused';
+    if (kind === 'pomodoro-start') button.hidden = phase !== 'idle';
+    if (kind === 'pomodoro-pause') button.hidden = phase !== 'focus' && phase !== 'break';
     if (kind === 'pomodoro-resume') button.hidden = phase !== 'paused';
+    if (kind === 'pomodoro-stop') button.hidden = phase === 'idle';
   }
   element('sleep-status').textContent = state.sleepSlot ? '当前在作息睡眠时段' : '当前无作息睡眠';
-  element('stage').textContent = `阶段 ${state.stage} · ${state.stage >= 3 ? '同榻' : state.stage === 2 ? '相逢' : '同行'}`;
-  element('unlock-summary').textContent = state.stage >= 3 ? '亲亲与双人床均已解锁，关闭角色不会重新上锁。' : state.stage === 2 ? '双人床：双方各 4,000，并共同工作、体验亲亲。' : '亲亲：双方各 1,000，各睡过一次，并完成面对面对话。';
+  const stageLabel = `阶段 ${state.stage} · ${state.stage >= 3 ? '同榻' : state.stage === 2 ? '相逢' : '同行'}`;
+  const unlockSummary = state.stage >= 3 ? '亲亲与双人床均已解锁，关闭角色不会重新上锁。' : state.stage === 2 ? '双人床：双方各 4,000，并共同工作、体验亲亲。' : '亲亲：双方各 1,000，各睡过一次，并完成面对面对话。';
+  element('growth-stage').textContent = stageLabel;
+  element('growth-unlock-summary').textContent = unlockSummary;
   const activities = { standing: '站立', working: '工作', sleeping: '睡眠' };
   for (const id of petIds) {
     const pet = state.pets[id];
     const p = pet.progress;
     const target = state.stage === 1 ? 1000 : 4000;
     element(`${id}-presence`).textContent = pet.present ? `在场 · ${activities[pet.activity]}` : '离场 · 暂停成长';
+    element(`${id}-companion-presence`).textContent = pet.present ? '在场' : '离场 · 暂停成长';
+    element(`${id}-companion-activity`).textContent = pet.present ? activities[pet.activity] : '暂停成长';
     element(`${id}-score`).textContent = p.intimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
     element(`${id}-target`).textContent = state.stage >= 3 ? '解锁已完成 · 继续记录陪伴' : `${target.toLocaleString()} 目标 · ${p.intimacy >= target ? '数值已达标，等待双方条件齐备' : `还差 ${Math.ceil(target - p.intimacy).toLocaleString()}`}`;
     const bar = element<HTMLProgressElement>(`${id}-progress`);
     bar.max = target;
     bar.value = Math.min(p.intimacy, target);
+    const companionBar = element<HTMLProgressElement>(`${id}-companion-progress`);
+    companionBar.max = target;
+    companionBar.value = Math.min(p.intimacy, target);
+    const hearts = element(`${id}-hearts`);
+    const clampedIntimacy = Math.min(target, Math.max(0, p.intimacy));
+    const filledHearts = Math.floor((clampedIntimacy / target) * 5);
+    hearts.setAttribute('aria-valuemax', String(target));
+    hearts.setAttribute('aria-valuenow', String(clampedIntimacy));
+    hearts.setAttribute('aria-label', `${petNames[id]}亲密度 ${clampedIntimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`);
+    hearts.querySelectorAll<HTMLElement>('.heart').forEach((heart, index) => {
+      heart.classList.toggle('filled', index < filledHearts);
+      heart.style.setProperty('--heart-fill', `${Math.max(0, Math.min(1, clampedIntimacy / (target / 5) - index)) * 100}%`);
+      heart.classList.toggle('partial', index === filledHearts && filledHearts < 5 && clampedIntimacy % (target / 5) > 0);
+    });
+    element(`${id}-companion-summary`).textContent = `亲密度 ${p.intimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`;
     const milestones: [string, boolean][] = [['亲亲数值 1,000', p.intimacy >= 1000], ['单人睡眠', p.slept], ['面对面对话完成', p.faceCompleted], ['双人床数值 4,000', p.intimacy >= 4000], ['共同工作', p.workedTogether], ['体验亲亲', p.kissed]];
     const list = element(`${id}-milestones`);
     list.replaceChildren(...milestones.map(([label, done]) => {
@@ -252,7 +369,7 @@ function render(): void {
   if (preview) {
     element('connection').textContent = '浏览器演示 · 模拟数据，不读取或保存个人进度';
     element('draft-status').textContent = '请使用演示页上方的场景按钮；此页设置操作已禁用。';
-    root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button').forEach(control => { control.disabled = true; });
+    root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button:not(.settings-tab)').forEach(control => { control.disabled = true; });
   }
 }
 
@@ -305,7 +422,9 @@ function renderCatalogue(state: AppSnapshot): void {
 function updateDraftStatus(): void {
   element('draft-status').textContent = dirty.size ? `有 ${dirty.size} 项未保存；计时更新不会覆盖你的编辑。` : '所有设置已同步';
   element<HTMLButtonElement>('save').disabled = busy || !snapshot || !dirty.size;
-  element<HTMLButtonElement>('discard').disabled = busy || !dirty.size;
+  const discard = element<HTMLButtonElement>('discard');
+  discard.hidden = !dirty.size;
+  discard.disabled = busy || !dirty.size;
 }
 for (const control of controls) {
   control.addEventListener('input', () => {
@@ -327,6 +446,7 @@ element('save').addEventListener('click', () => {
       const value = control.valueAsNumber;
       if (!Number.isInteger(value) || value < Number(control.min) || value > Number(control.max)) {
         showError(`请输入 ${control.min}–${control.max} 之间的整数分钟。`);
+        activateTab('settings');
         control.focus();
         return;
       }

@@ -5,7 +5,7 @@ import { acceptPetMenuAction, calculatePetLayout, userFacingPetError } from '../
 import { DOUBLE_CLICK_TOLERANCE_MS, FALLBACK_DOUBLE_CLICK_INTERVAL_MS, controlSemanticsChanged, gestureFinishAction, isRoleDialogue, nextSinglePetActivity, normalizeDoubleClickDelay, pairModeIsStanding, shouldIgnoreSingleClick, shouldRunDelayedSingleClick, shouldSplitOnDoubleClick } from '../src/click-logic.ts';
 
 test('click rules keep single and double clicks mutually exclusive', () => {
-  assert.equal(normalizeDoubleClickDelay(470), 470 + DOUBLE_CLICK_TOLERANCE_MS);
+  assert.equal(normalizeDoubleClickDelay(470), 180);
   assert.equal(normalizeDoubleClickDelay(undefined), FALLBACK_DOUBLE_CLICK_INTERVAL_MS + DOUBLE_CLICK_TOLERANCE_MS);
   assert.deepEqual(['standing', 'working', 'sleeping'].map(nextSinglePetActivity), ['working', 'sleeping', 'standing']);
   assert.equal(pairModeIsStanding('face-dialogue'), true);

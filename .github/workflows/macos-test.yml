@@ -1,0 +1,78 @@
+name: macOS test package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-test:
+    name: macOS ${{ matrix.arch }} test package
+    runs-on: macos-14
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-apple-darwin
+          - arch: arm64
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Prepare Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:ui-logic
+      - name: Backend logic tests (without native input tests)
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib state::
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib store::
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib runtime::
+      - name: Build macOS app
+        run: node scripts/build.mjs --target "${{ matrix.target }}" --bundles app
+      - name: Verify, archive, and checksum app
+        run: |
+          set -euo pipefail
+          package_dir="macos-test-package"
+          app_path="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Dual Pet.app"
+          zip_name="Dual-Pet-0.3.0-mac-${{ matrix.arch }}.zip"
+          zip_path="$package_dir/$zip_name"
+
+          test -d "$app_path"
+          codesign --verify --deep --strict "$app_path"
+          signature="$(codesign -dv --verbose=4 "$app_path" 2>&1 || true)"
+          printf '%s\n' "$signature"
+          printf '%s\n' "$signature" | grep -q '^Signature=adhoc$'
+
+          mkdir -p "$package_dir"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+          cp docs/V03_MACOS_DOWNLOAD.md "$package_dir/README.md"
+          (
+            cd "$package_dir"
+            shasum -a 256 "$zip_name" > SHA256SUMS.txt
+          )
+      - name: Upload macOS test package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dual-pet-macos-${{ matrix.arch }}-test
+          path: macos-test-package/
+          if-no-files-found: error
+          retention-days: 14

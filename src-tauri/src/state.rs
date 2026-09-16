@@ -820,17 +820,30 @@ impl Core {
         if !self.state.settings.bubbles_enabled || self.dialogue_cooldown > 0.0 { return false; }
         // Exact IDs, speakers and excerpts from src/dialogue-catalog.ts. The
         // work invitation has no spoken response in its source; do not invent one.
-        let lines = match kind {
-            "face-dialogue" => vec![
+        let scenes = vec![
+            ("face-dialogue", "face-dialogue", vec![
                 DialogueLine { speaker: Speaker::A, text: "好箭术！".into() },
                 DialogueLine { speaker: Speaker::B, text: "闭嘴。小心！".into() },
-            ],
-            "shared-work" => vec![
+            ]),
+            ("shared-work", "shared-work", vec![
                 DialogueLine { speaker: Speaker::A, text: "喝酒去吗，江晏？".into() },
-            ],
-            _ => return false,
-        };
-        self.remember_dialogue(kind);
+            ]),
+            ("jiangnan-reply", "face-dialogue", vec![DialogueLine { speaker: Speaker::B, text: "不如你。还敢邀我游江南。".into() }]),
+            ("delight", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "痛快！".into() }]),
+            ("travel-together", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "不如，你我同往？".into() }]),
+            ("together", "shared-work", vec![DialogueLine { speaker: Speaker::A, text: "也罢，总归还有我同你一道。".into() }]),
+            ("trouble", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "连绣金楼都出手了？你这回惹得麻烦可真不小。".into() }]),
+            ("joking", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "哈，走投无路的日子久了，冷心冷面的江大侠都会说笑了？稀罕！".into() }]),
+            ("drink-together", "shared-work", vec![DialogueLine { speaker: Speaker::A, text: "此情此景，与尔共饮，岂非美酒乎？".into() }]),
+        ];
+        let mut eligible: Vec<_> = scenes.into_iter().filter(|(_, trigger, _)| *trigger == kind).collect();
+        if eligible.is_empty() { return false; }
+        // Discover each excerpt before replaying randomly. Scene IDs are collection
+        // keys; kind remains the interaction kind for locks and milestones.
+        let index = eligible.iter().position(|(id, _, _)| !self.state.unlocked_dialogues.iter().any(|known| known == id))
+            .unwrap_or_else(|| fastrand::usize(..eligible.len()));
+        let (id, _, lines) = eligible.swap_remove(index);
+        self.remember_dialogue(id);
         self.start_dialogue(kind, lines);
         true
     }
@@ -1372,7 +1385,7 @@ mod tests {
         seconds(&mut c, 1); assert!(c.state.dialogue.is_none());
         command(&mut c, action("split", None)); command(&mut c, action("join", Some(PetId::A)));
         assert!(c.state.dialogue.is_some());
-        assert_eq!(c.state.unlocked_dialogues.len(), 1);
+        assert_eq!(c.state.unlocked_dialogues, ["face-dialogue", "jiangnan-reply"]);
     }
 
     #[test]
@@ -1387,6 +1400,31 @@ mod tests {
             assert_eq!(d.lines.len(), if kind == "face-dialogue" { 2 } else { 1 });
         }
         assert_eq!(line_duration("短句"), 3.0); assert_eq!(line_duration(&"字".repeat(100)), 7.0);
+    }
+
+    #[test]
+    fn new_excerpts_are_discovered_collected_and_keep_interaction_kind() {
+        let catalogue = include_str!("../../src/dialogue-catalog.ts");
+        for (kind, count) in [("face-dialogue", 6), ("shared-work", 3)] {
+            let mut c = Core::new(clock());
+            for _ in 0..count {
+                c.dialogue_cooldown = 0.0;
+                assert!(c.start_pair_dialogue(kind));
+                let id = c.state.unlocked_dialogues.last().unwrap();
+                assert!(catalogue.contains(&format!("id: '{id}'")));
+                let d = c.state.dialogue.as_ref().unwrap();
+                assert_eq!(d.kind, kind);
+                for line in &d.lines {
+                    assert!(catalogue.contains(&format!("speaker: 'pet-{}', text: '{}'", if matches!(line.speaker, Speaker::A) { "a" } else { "b" }, line.text)));
+                }
+            }
+            assert_eq!(c.state.unlocked_dialogues.len(), count);
+            c.dialogue_cooldown = 0.0;
+            assert!(c.start_pair_dialogue(kind));
+            assert_eq!(c.state.unlocked_dialogues.len(), count);
+            c.state.settings.bubbles_enabled = false;
+            assert!(!c.start_pair_dialogue(kind));
+        }
     }
 
     #[test]
