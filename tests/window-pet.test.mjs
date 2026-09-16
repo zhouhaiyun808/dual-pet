@@ -17,7 +17,7 @@ registerHooks({
   load(url, context, next) {
     if (url.startsWith('mock:')) {
       const name = url.slice(5);
-      const keys = {window: ['getCurrentWindow','Window','LogicalSize','LogicalPosition','PhysicalPosition','currentMonitor','primaryMonitor','availableMonitors','cursorPosition'], event:['listen'], core:['invoke'], assets:['getBedFrame','getStaticFrame','getWalkFrames','loadSprite']}[name];
+      const keys = {window: ['getCurrentWindow','Window','LogicalSize','LogicalPosition','PhysicalPosition','currentMonitor','primaryMonitor','availableMonitors','cursorPosition'], event:['listen'], core:['invoke'], assets:['getBedFrame','getStaticFrame','getWalkFrames','getWorkFrameNames','getWorkFrameUrl','loadSprite','loadWorkFrameSprite']}[name];
       return {format:'module', shortCircuit:true, source:keys.map(key => `export const ${key} = (...args) => globalThis.__petAdapters.${key}(...args);`).join('\n').replace(/export const (Window|LogicalSize|LogicalPosition|PhysicalPosition) = [^\n]+/g, (_, key) => `export const ${key} = globalThis.__petAdapters.${key};`)};
     }
     if (url.endsWith('.ts')) return {format:'module', shortCircuit:true, source:ts.transpileModule(readFileSync(new URL(url),'utf8'), {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText};
@@ -59,6 +59,11 @@ const native = {
   getBedFrame: (color, paired) => `${color}/${paired ? 'double':'single'}`,
   getStaticFrame: (id, name) => `${id}/${name}`,
   getWalkFrames: async (id,direction) => [0,1,2].map(i=>`${id}/${direction}/${i}`),
+  getWorkFrameNames: scene => scene === 'dual-jiangchen'
+    ? ['idle','chen-stroke','chen-blink','jiang-book-closed','jiang-blink']
+    : scene === 'solo-chen' ? ['idle','chen-blink','chen-stroke'] : ['idle','jiang-blink','jiang-book-closed'],
+  getWorkFrameUrl: (scene,frame) => `work/${scene}/${frame}`,
+  loadWorkFrameSprite: async scene => ({image:{},x:0,y:0,width:scene.includes('dual')?208:114,height:100}),
   loadSprite: async () => ({image:{},x:0,y:0,width:80,height:80}),
 };
 globalThis.__petAdapters = native;

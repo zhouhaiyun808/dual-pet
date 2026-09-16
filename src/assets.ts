@@ -1,6 +1,7 @@
 import type { Direction } from './types';
 export interface Sprite { image: HTMLCanvasElement; x: number; y: number; width: number; height: number }
 const cache = new Map<string, Promise<Sprite>>();
+const fixedCache = new Map<string, Promise<Sprite>>();
 export function loadSprite(url: string): Promise<Sprite> {
   if (!cache.has(url)) cache.set(url, (async () => {
     const image = new Image(); image.src = url; await image.decode();
@@ -63,10 +64,75 @@ export function getStaticFrame(id: string, name: string) {
 // New approved spritesheets use a fixed canvas. Never strip disconnected props
 // or crop individual animation frames with the legacy sprite repair pipeline.
 export async function loadFixedSprite(url: string): Promise<Sprite> {
-  const image = new Image(); image.src = url; await image.decode();
-  const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
-  canvas.getContext('2d')!.drawImage(image, 0, 0);
-  return { image: canvas, x: 0, y: 0, width: image.width, height: image.height };
+  if (!fixedCache.has(url)) fixedCache.set(url, (async () => {
+    const image = new Image(); image.src = url; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    canvas.getContext('2d')!.drawImage(image, 0, 0);
+    return { image: canvas, x: 0, y: 0, width: image.width, height: image.height };
+  })());
+  return fixedCache.get(url)!;
+}
+
+/** Keep every source pixel intact while trimming only transparent canvas padding. */
+export async function loadBoundedSprite(url: string): Promise<Sprite> {
+  const fixed = await loadFixedSprite(url);
+  const pixels = fixed.image.getContext('2d')!.getImageData(0, 0, fixed.image.width, fixed.image.height).data;
+  let x = fixed.image.width, y = fixed.image.height, right = 0, bottom = 0;
+  for (let row = 0; row < fixed.image.height; row++) for (let col = 0; col < fixed.image.width; col++) {
+    if (pixels[(row * fixed.image.width + col) * 4 + 3] > 16) {
+      x = Math.min(x, col); y = Math.min(y, row); right = Math.max(right, col + 1); bottom = Math.max(bottom, row + 1);
+    }
+  }
+  return { image: fixed.image, x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
+}
+
+export type WorkScene = 'solo-chen' | 'solo-jiang' | 'dual-jiangchen';
+export type WorkFrame = 'idle' | 'chen-blink' | 'chen-stroke' | 'jiang-blink' | 'jiang-book-closed';
+
+const workFrameFiles: Record<WorkScene, Partial<Record<WorkFrame, string>>> = {
+  'solo-chen': {
+    idle: '00-idle.png',
+    'chen-blink': '03-blink-closed.png',
+    'chen-stroke': '06-stroke-mid.png',
+  },
+  'solo-jiang': {
+    idle: '00-idle.png',
+    'jiang-blink': '03-blink-closed.png',
+    'jiang-book-closed': '06-book-closed.png',
+  },
+  'dual-jiangchen': {
+    idle: '00-idle.png',
+    'chen-stroke': '04-chen-stroke-mid.png',
+    'chen-blink': '08-chen-blink-closed.png',
+    'jiang-book-closed': '11-jiang-book-closed.png',
+    'jiang-blink': '12-jiang-blink-closed.png',
+  },
+};
+
+const workSceneBounds: Record<WorkScene, Pick<Sprite, 'x' | 'y' | 'width' | 'height'>> = {
+  'solo-chen': { x: 262, y: 48, width: 496, height: 432 },
+  'solo-jiang': { x: 262, y: 72, width: 496, height: 416 },
+  'dual-jiangchen': { x: 64, y: 52, width: 896, height: 432 },
+};
+
+export function getWorkFrameNames(scene: WorkScene): WorkFrame[] {
+  return Object.keys(workFrameFiles[scene]) as WorkFrame[];
+}
+
+export function getWorkFrameUrl(scene: WorkScene, frame: WorkFrame): string {
+  const file = workFrameFiles[scene][frame];
+  if (!file) throw new Error(`Missing work frame ${scene}/${frame}`);
+  return `/assets/work-frames/${scene}/${file}`;
+}
+
+export function getWorkSceneUrl(scene: WorkScene) { return getWorkFrameUrl(scene, 'idle'); }
+
+export async function loadWorkFrameSprite(scene: WorkScene, frame: WorkFrame): Promise<Sprite> {
+  const fixed = await loadFixedSprite(getWorkFrameUrl(scene, frame));
+  if (fixed.image.width !== 1024 || fixed.image.height !== 536) {
+    throw new Error(`Invalid work frame dimensions for ${scene}/${frame}`);
+  }
+  return { image: fixed.image, ...workSceneBounds[scene] };
 }
 export function getBedFrame(color: 'green' | 'blue', paired: boolean) {
   return `/assets/beds/${color}-${paired ? 'double' : 'single'}.png`;

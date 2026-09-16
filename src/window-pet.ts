@@ -2,10 +2,10 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, Window, LogicalSize, LogicalPosition, PhysicalPosition, currentMonitor, primaryMonitor, availableMonitors, cursorPosition, type Monitor } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import type { Direction, PetProfile } from './types';
-import { getBedFrame, getStaticFrame, getWalkFrames, loadSprite, type Sprite } from './assets';
+import { getBedFrame, getStaticFrame, getWalkFrames, getWorkFrameNames, getWorkFrameUrl, loadSprite, loadWorkFrameSprite, type Sprite } from './assets';
 import { bottomRightPosition, clampWindowPosition, cssDeltaToPhysical, normalizeRect, intersects, type PhysicalRect } from './window-geometry';
 import { type AppSnapshot, type AppAction, petNames, type PetId } from './app-state';
-import { paintWorkScene } from './work-scene';
+import { paintWorkScene, sceneForPet, workFrameAt } from './work-scene';
 import { acceptPetMenuAction, calculatePetLayout, userFacingPetError, type PetMenuActionPayload } from './pet-ui-logic';
 import { controlSemanticsChanged, gestureFinishAction, isRoleDialogue, nextSinglePetActivity, normalizeDoubleClickDelay, shouldIgnoreSingleClick, shouldRunDelayedSingleClick, shouldSplitOnDoubleClick } from './click-logic';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -37,6 +37,7 @@ export class WindowPet {
   private canvas = document.querySelector<HTMLCanvasElement>('#pet-image')!;
   private pet = document.querySelector<HTMLDivElement>('#pet')!;
   private sprites = new Map<string, Sprite>();
+  private workSprites = new Map<string, Sprite>();
   private walks = new Map<Direction, string[]>();
   private direction: Direction = 'down';
   private frame = 0;
@@ -71,6 +72,7 @@ export class WindowPet {
   private statusWidth = 0;
   private renderedSize = '';
   private working = false;
+  private workStartedAt = 0;
   private faceMode = false;
   private errorTimer: number | null = null;
   private pendingSingleClick: number | null = null;
@@ -121,6 +123,11 @@ export class WindowPet {
     await Promise.all((['green', 'blue'] as const).flatMap(color => [false, true].map(async paired => {
       const url = getBedFrame(color, paired); this.sprites.set(url, await loadSprite(url));
     })));
+    await Promise.all((['solo-chen', 'solo-jiang', 'dual-jiangchen'] as const).flatMap(scene =>
+      getWorkFrameNames(scene).map(async frame => {
+        const url = getWorkFrameUrl(scene, frame);
+        this.workSprites.set(url, await loadWorkFrameSprite(scene, frame));
+      })));
     this.doubleClickDelayMs = normalizeDoubleClickDelay(await invoke<number | null>('get_double_click_interval').catch(error => {
       console.error(error); return null;
     }));
@@ -175,7 +182,12 @@ export class WindowPet {
       this.faceMode = this.paired && pair?.mode === 'face-dialogue';
       this.ownLeft = this.paired ? pair!.ownLeft : true;
       this.sleeping = this.paired ? pair!.mode === 'double-sleep' : next.pets[id].activity === 'sleeping';
+      const wasWorking = this.working;
       this.working = this.paired ? pair!.mode === 'shared-work' : next.pets[id].activity === 'working';
+      if (this.working !== wasWorking) {
+        this.workStartedAt = this.working ? performance.now() : 0;
+        this.lastPaint = '';
+      }
       this.bedColor = this.paired ? pair!.bedColor : id === 'pet-a' ? 'green' : 'blue';
       // A timed transition or a close cancels in-flight drag writes before layout.
       if (previous && controlSemanticsChanged(previous, next, id)) this.invalidateGesture();
@@ -248,7 +260,13 @@ export class WindowPet {
   }
   private geometry() {
     const height = this.size();
-    if (this.working) return { width: Math.ceil(height * (this.paired ? 2.65 : 1.65)), height: Math.ceil(height * 1.4) };
+    if (this.working) {
+      const scene = sceneForPet(this.profile.config.id, this.paired);
+      const sprite = this.workSprites.get(getWorkFrameUrl(scene, 'idle'));
+      const workHeight = Math.ceil(height * 1.4);
+      const aspect = sprite ? sprite.width / sprite.height : this.paired ? 2.08 : 1.14;
+      return { width: Math.ceil(workHeight * aspect), height: workHeight };
+    }
     if (this.sleeping) {
       const bed = this.sprites.get(getBedFrame(this.paired ? this.bedColor : 'green', this.paired));
       if (bed) return { width: Math.ceil(height * 1.45 * bed.width / bed.height), height: Math.ceil(height * 1.45) };
@@ -292,7 +310,10 @@ export class WindowPet {
     const frames = this.walks.get(this.direction)!;
     const url = this.sleeping ? getStaticFrame(this.profile.config.id, 'sleep') : frames[walking ? this.frame % frames.length : this.profile.config.id === 'pet-a' && this.direction === 'down' ? 2 : 0];
     const dpi = window.devicePixelRatio || 1;
-    const key = `${this.paired}:${this.faceMode}:${this.working}:${this.working ? Math.floor(now / 500) : 0}:${this.ownLeft}:${this.bedColor}:${this.size()}:${dpi}:${url}`;
+    const workScene = this.working ? sceneForPet(this.profile.config.id, this.paired) : null;
+    const workFrame = workScene ? workFrameAt(workScene, now - this.workStartedAt) : null;
+    const workUrl = workScene && workFrame ? getWorkFrameUrl(workScene, workFrame) : null;
+    const key = `${this.paired}:${this.faceMode}:${this.working}:${this.ownLeft}:${this.bedColor}:${this.size()}:${dpi}:${workUrl ?? url}`;
     if (key === this.lastPaint) return;
     this.lastPaint = key;
     const { width, height } = this.geometry();
@@ -302,10 +323,8 @@ export class WindowPet {
     ctx.setTransform(dpi, 0, 0, dpi, 0, 0);
     ctx.clearRect(0, 0, width, height); ctx.imageSmoothingEnabled = false;
     if (this.working) {
-      const ids = this.paired
-        ? [this.ownLeft ? this.profile.config.id : this.profile.config.partnerId, this.ownLeft ? this.profile.config.partnerId : this.profile.config.id]
-        : [this.profile.config.id];
-      paintWorkScene(ctx, width, height, ids.map(id => ({ id, sprite: this.sprites.get(getStaticFrame(id, 'face-' + (ids.length === 1 || id === ids[0] ? 'right' : 'left')))! })), now);
+      const sprite = workUrl ? this.workSprites.get(workUrl) : undefined;
+      if (sprite && workScene) paintWorkScene(ctx, width, height, workScene, sprite);
       return;
     }
     if (this.sleeping) {

@@ -1,5 +1,13 @@
 # Agent Handoff
 
+## Mac 工作动画包：2026-09-16
+
+按用户要求检查现有资源并打包，未改业务代码、未启动桌宠或窗口测试、未修改个人存档。工作状态已接入 11 张正式 PNG（单人陈、单人江、双人），固定画布与循环测试通过。新增台词仍只在 `docs/V03_DIALOGUE_CANDIDATES.md`，正式目录及后端仍为原有两段；未擅自入库或编排候选台词。
+
+本次验证：前端 36 项、Rust state 43 项／store 8 项／runtime 4 项通过；生产前端与 macOS x86_64 release 编译通过。未重新执行此前发生 SIGSEGV 的原生 input 测试，旧问题不标记已修。应用 ad-hoc 签名校验通过，未公证；动画运行观感仍由用户验收。
+
+产物目录：`src-tauri/target/x86_64-apple-darwin/release/bundle/macos/`，应用 `Dual Pet.app`，交付压缩包 `Dual-Pet-0.3.0-mac-x64-work-20260916.zip`。DMG 的 `bundle_dmg.sh` 步骤失败，不交付可能残留的 DMG；改用保留 app 元数据的 ZIP。此包是 Intel x64，不是 universal。退出旧版后使用新版，输入监控权限可能需要针对新路径重新授权。未提交／推送本轮改动。
+
 ## Windows 测试包构建接入：2026-09-15
 
 用户批准将当前阶段成果推送 GitHub，并通过 Actions 提供 Windows x64 测试包。新增 `.github/workflows/windows-test.yml`：main 推送或手动触发，纯逻辑测试后构建 NSIS，上传保留 14 天的私有仓库 artifact，不创建公开 Release、不启动窗口测试。下载说明见 `docs/V03_WINDOWS_DOWNLOAD.md`。首次构建是否成功以 GitHub 运行结果为准，不能将工作流已配置等同于 Windows 真机通过。本轮不扩展功能、美术或台词。

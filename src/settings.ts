@@ -7,6 +7,8 @@ import { acceptCounts, displayedCounts, inputStatusText, type InputCounts } from
 import { dailyEarningsBreakdown, formatDailyEarnings, formatDailySourceEarnings } from './growth-details';
 import { isCounterPreview } from './counter-logic';
 import { connectPreview } from './preview-bridge';
+import { getWorkSceneUrl, loadBoundedSprite, type WorkScene } from './assets';
+import { paintWorkScene } from './work-scene';
 import './settings.css';
 
 const root = document.querySelector<HTMLElement>('#settings-app')!;
@@ -57,14 +59,15 @@ root.innerHTML = `
     <p id="collection-count" class="hint">原作短句，保留出处与原场景。</p><div class="catalogue" id="catalogue"></div>
   </section>
   <section class="card" aria-labelledby="art-heading">
-    <div class="section-head"><h2 id="art-heading">工作造型 · 等你过目</h2><span class="badge">候选，未验收</span></div>
-    <a class="art-preview" href="/assets/work-candidates/keyframes.png" target="_blank" rel="noopener noreferrer" aria-label="打开工作关键帧候选原图"><img src="/assets/work-candidates/keyframes.png" alt="陈子奚批注、江晏研习及双人桌的工作关键帧候选；尚未通过透明背景与光晕检查" loading="lazy"></a>
-    <p id="art-load-error" class="hint" hidden>候选预览暂不可用，可尝试打开原图。</p>
-    <p class="hint">这张图含不透明底色和光晕，暂不满足正式透明精灵要求，未用于桌宠显示。</p>
-    <p class="hint" style="margin-top:8px">目前桌宠使用原始人物搭配临时桌面、书本图层进行联调；不是已验收的最终工作循环。</p>
-    <ol class="art-steps"><li>先验收人物、桌面与道具静态造型，再修订正式透明资源。</li><li>制作最终循环后，由你在真机验收节奏与比例。</li></ol>
-    <div class="actions"><a href="/assets/work-candidates/keyframes.png" target="_blank" rel="noopener noreferrer">查看候选原图 ↗</a><a href="/assets/work-candidates/README.md" target="_blank" rel="noopener noreferrer">查看美术说明 ↗</a></div>
-    <p class="hint" style="margin-top:10px">面对面复用左右行走站定帧，朝向和表现同样待你确认。此页仅供审看，不会替你标记验收通过。</p>
+    <div class="section-head"><h2 id="art-heading">工作动画关键帧</h2><span class="badge">已接入</span></div>
+    <div class="work-preview-grid" aria-label="三种工作母帧预览">
+      <figure class="work-preview work-preview-dual"><canvas data-work-scene="dual-jiangchen" aria-label="陈子奚与江晏共同工作母帧"></canvas><figcaption>共同工作母帧</figcaption></figure>
+      <figure class="work-preview"><canvas data-work-scene="solo-chen" aria-label="陈子奚单人工作母帧"></canvas><figcaption>陈子奚 · 母帧</figcaption></figure>
+      <figure class="work-preview"><canvas data-work-scene="solo-jiang" aria-label="江晏单人工作母帧"></canvas><figcaption>江晏 · 母帧</figcaption></figure>
+    </div>
+    <p id="art-load-error" class="hint" hidden>工作循环预览暂不可用；桌宠仍会在素材成功加载后显示。</p>
+    <p class="hint">工作状态现已使用独立透明 PNG 播放眨眼、落笔和合书动作；设置页保留静态母帧方便核对画面。</p>
+    <div class="actions" style="margin-top:10px"><a href="/assets/work-frames/dual-jiangchen/00-idle.png" target="_blank" rel="noopener noreferrer">查看双人母帧 ↗</a><a href="/assets/work-frames/README.md" target="_blank" rel="noopener noreferrer">查看美术说明 ↗</a></div>
   </section>
   <div class="savebar"><p id="draft-status" class="hint" role="status">设置读取中…</p><div class="actions"><button id="discard" disabled>撤销草稿</button><button id="save" class="primary" disabled>保存设置</button></div></div>
   <footer>本地记录 · 各自成长 · 一起同行</footer>
@@ -73,9 +76,27 @@ root.innerHTML = `
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
+async function startWorkPreviews(): Promise<void> {
+  const canvases = Array.from(root.querySelectorAll<HTMLCanvasElement>('[data-work-scene]'));
+  const previews = await Promise.all(canvases.map(async canvas => {
+    const scene = canvas.dataset.workScene as WorkScene;
+    return { canvas, scene, sprite: await loadBoundedSprite(getWorkSceneUrl(scene)) };
+  }));
+  const dpi = window.devicePixelRatio || 1;
+  for (const { canvas, scene, sprite } of previews) {
+    const width = Math.max(1, Math.round(canvas.clientWidth));
+    const height = Math.max(1, Math.round(width * sprite.height / sprite.width));
+    canvas.style.aspectRatio = `${sprite.width} / ${sprite.height}`;
+    canvas.width = Math.round(width * dpi); canvas.height = Math.round(height * dpi);
+    const ctx = canvas.getContext('2d')!;
+    ctx.setTransform(dpi, 0, 0, dpi, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    paintWorkScene(ctx, width, height, scene, sprite);
+  }
+}
+void startWorkPreviews().catch(() => { element('art-load-error').hidden = false; });
 const controls = Array.from(root.querySelectorAll<HTMLInputElement>('[data-setting]'));
 const actionButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-action]'));
-root.querySelector('img')?.addEventListener('error', () => { element('art-load-error').hidden = false; });
 let snapshot: AppSnapshot | null = null;
 let busy = false;
 let unlisten: UnlistenFn | undefined;
