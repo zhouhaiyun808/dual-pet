@@ -1,5 +1,15 @@
 # Agent Handoff
 
+## 最新交接：2026-09-17 UI 阶段已推送
+
+- GitHub `main` 已推送 `d91e5f5`；用户已确认看到 push。本条是推送后的本地交接补记，尚未单独提交。
+- 已完成：四页签与专注首页三卡、阶梯边框／角花／玉绿按钮、像素计时数字与键鼠 icon；陈子奚正面头像；完整金燕，无流苏挂坠。两位 Luna 子任务已收回并归档。
+- 验证：前端 36 项、Rust state/store/runtime 共 56 项、生产构建、浏览器模拟 IPC 交互与 620／400 宽度检查通过。未进行原生窗口或输入真机验收。
+- 本地 Intel Mac release `.app` 已构建并完成 ad-hoc 签名步骤：`src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Dual Pet.app`。未启动、未公证；本轮尚未另行生成本地 ZIP 或独立复核签名。
+- CI 最后检查仍在运行： [Windows x64](https://github.com/zhouhaiyun808/dual-pet/actions/runs/35126676306)、[macOS x64 / ARM64](https://github.com/zhouhaiyun808/dual-pet/actions/runs/35126676105)。前端构建与测试已通过，正在后端测试阶段；未确认最终 artifact，接手先查这两次运行，不要把已触发当作打包成功。
+- 审看：`artifacts/settings-stage2-desktop.png`、`artifacts/settings-stage2-minimum.png`；详细说明 `docs/V03_UI_STAGE2.md`。视觉还原待用户反馈，不能标记一比一验收通过。
+- 未引用的 `public/assets/work-frames-draft/` 与旧预览截图保留本地。下一步仅收尾 CI 结果／下载产物与用户反馈，不自动扩展动画或新功能。
+
 ## 设置页效果图还原：2026-09-17
 
 用户要求继续 UI、明确边界交给 Luna，阶段完成推送 GitHub 并跑 Mac／Windows 打包。阶段说明与验证见 `docs/V03_UI_STAGE2.md`。四页签、首页三卡、连续阶梯边框、像素数字与键鼠 icon 已整合；陈为正面，金燕无挂坠。新增 macOS 双架构工作流，Windows 沿用现有流程。当前用户授权覆盖下方历史“暂不打包／不推送”限制；不扩大为动画、美术或业务的额外开发。未引用工作帧草稿仍只留本地。实际 CI 成功状态以 GitHub 本次运行结果为准。
