@@ -115,6 +115,7 @@ fn read_save(path: &Path) -> Result<CoreSave, ReadError> {
     if version != SAVE_VERSION as u64 { return Err(ReadError::Unsupported(version)); }
     let mut envelope: Envelope = serde_json::from_value(value).map_err(|error| ReadError::Corrupt(error.to_string()))?;
     envelope.state.migrate_legacy_bond();
+    envelope.state.migrate_legacy_input_totals();
     envelope.state.validate().map_err(ReadError::Corrupt)?;
     Ok(envelope.state)
 }
@@ -347,5 +348,33 @@ mod tests {
         let migrated: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
         assert_eq!(migrated["state"]["snapshot"]["bond"]["value"], 1700.0);
         assert!(migrated["state"]["snapshot"]["pets"]["pet-a"]["progress"].get("intimacy").is_none());
+    }
+
+    #[test]
+    fn legacy_missing_device_totals_clears_only_input_history_and_budgets() {
+        let directory = TestDirectory::new(); let store = directory.store();
+        let mut core = Core::new(clock()); earn(&mut core, 600_001);
+        let mut settings = core.snapshot().settings;
+        settings.focus_minutes = 45;
+        core.dispatch(crate::state::AppAction { kind: "settings".into(), settings: Some(settings), ..crate::state::AppAction::default() }, None, clock()).unwrap();
+        store.save(&core).unwrap();
+        let before = core.snapshot();
+        let mut value: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        value["state"]["snapshot"].as_object_mut().unwrap().remove("inputTotals");
+        fs::write(store.path(), serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        let loaded = store.load(clock()).unwrap();
+        let snapshot = loaded.snapshot();
+        assert_eq!(snapshot.input_totals, crate::state::InputTotals { day: "2026-09-14".into(), ..Default::default() });
+        for id in PetId::ALL {
+            let p = &snapshot.pets[&id].progress;
+            assert_eq!((p.key_presses, p.mouse_clicks, p.today_keys, p.today_clicks), (0, 0, 0, 0));
+            assert_eq!(p.intimacy, before.pets[&id].progress.intimacy);
+            assert_eq!(p.daily_earned, before.pets[&id].progress.daily_earned);
+        }
+        assert_eq!(snapshot.bond, before.bond);
+        assert_eq!(snapshot.settings.focus_minutes, 45);
+        store.save(&loaded).unwrap();
+        let migrated: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        assert!(migrated["state"]["minuteBudgets"].as_object().unwrap().is_empty());
     }
 }

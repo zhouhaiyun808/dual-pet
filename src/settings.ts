@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { currentMonitor, getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import type { AppAction, AppSnapshot, PetId, Settings } from './app-state';
 import { petNames } from './app-state';
 import { dialogueCatalogue } from './dialogue-catalog';
-import { acceptCounts, displayedCounts, inputStatusText, type InputCounts } from './live-counts';
+import { acceptCounts, displayedCounts, displayedTotalCounts, inputStatusText, type InputCounts } from './live-counts';
 import { dailyEarningsBreakdown, formatDailyEarnings, formatDailySourceEarnings } from './growth-details';
 import { isCounterPreview } from './counter-logic';
 import { connectPreview } from './preview-bridge';
@@ -52,25 +53,22 @@ root.innerHTML = `
         <div class="actions"><button class="primary" data-action="pomodoro-start" disabled>开始专注</button><button data-action="pomodoro-pause" disabled>暂停</button><button data-action="pomodoro-resume" disabled hidden>继续</button><button data-action="pomodoro-stop" disabled>结束</button></div>
       </div>
     </section>
-    <section class="card companion-card" aria-labelledby="companion-heading">
-      <span class="companion-decoration chen" aria-hidden="true"><img class="pine" src="/assets/ui/chen-pine.png" alt=""><img class="jade" src="/assets/ui/chen-jade.png" alt=""></span>
-      <span class="companion-decoration jiang" aria-hidden="true"><img class="bamboo" src="/assets/ui/jiang-bamboo.png" alt=""><img class="swallow" src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>
+    <section class="card daily-card companion-card" aria-labelledby="companion-heading">
       <div class="section-head"><h2 id="companion-heading" class="ornament-heading">今日陪伴</h2></div>
-      <div class="companion-grid" id="companions"></div>
+      <div class="daily-grid companion-grid" id="companions"></div>
+      <p class="daily-status">离场期间暂停成长</p>
     </section>
-    <section class="card input-card" aria-labelledby="input-heading">
-      <span class="companion-decoration chen" aria-hidden="true"><img class="pine" src="/assets/ui/chen-pine.png" alt=""><img class="jade" src="/assets/ui/chen-jade.png" alt=""></span>
-      <span class="companion-decoration jiang" aria-hidden="true"><img class="bamboo" src="/assets/ui/jiang-bamboo.png" alt=""><img class="swallow" src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>
+    <section class="card daily-card input-card" aria-labelledby="input-heading">
       <div class="section-head"><h2 id="input-heading" class="ornament-heading">今日输入</h2></div>
-      <div class="input-grid" id="input-summary"></div>
-      <p id="input-status" class="input-status">等待输入统计状态…</p>
+      <div class="daily-grid input-grid" id="input-summary"></div>
+      <p id="input-status" class="daily-status">等待输入统计状态…</p>
     </section>
   </section>
   <section class="tab-panel" id="panel-growth" role="tabpanel" aria-labelledby="tab-growth" data-panel="growth" hidden>
     <section class="card" aria-labelledby="growth-heading">
       <div class="section-head"><h2 id="growth-heading" class="ornament-heading">两人的同行录</h2><span id="growth-stage" class="badge">阶段 —</span></div>
       <p id="growth-unlock-summary" class="hint" style="margin-bottom:14px">共享羁绊推动共同阶段，个人成长记录各自的陪伴。</p>
-      <article class="bond-detail"><div><span class="hint">两人羁绊</span><strong id="bond-score" class="score">—</strong></div><progress id="bond-progress" max="1000" value="0" aria-label="两人羁绊进度"></progress><p id="bond-daily" class="hint">今日羁绊 — / 800</p></article>
+      <article class="bond-detail"><div><span class="hint">两人羁绊</span><strong id="bond-score" class="score">—</strong></div><div class="hearts bond-detail-hearts" id="bond-growth-hearts" role="meter" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-label="两人羁绊">${'<span class="heart" aria-hidden="true"></span>'.repeat(5)}</div><p id="bond-daily" class="hint">今日羁绊 — / 800</p></article>
       <div class="pet-grid" id="pets"></div>
       <p class="notice">个人成长、里程碑与每日收益按角色分别记录；离场期间不会补算收益。工作动画、动作和装饰始终可用。</p>
     </section>
@@ -138,6 +136,30 @@ let settingsSaving = false;
 let saveTimer: number | undefined;
 let saveMessage = '所有设置已同步';
 let catalogueKey = '';
+let initialWindowFitted = false;
+let fittingInitialWindow = false;
+
+async function fitInitialWindow(): Promise<void> {
+  if (!hasTauri || initialWindowFitted || fittingInitialWindow || !snapshot) return;
+  fittingInitialWindow = true;
+  try {
+    await document.fonts.ready;
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const win = getCurrentWindow();
+    const [outer, scale, monitor] = await Promise.all([win.outerSize(), win.scaleFactor(), currentMonitor()]);
+    const outerWidth = outer.width / scale;
+    const chromeHeight = Math.max(0, outer.height / scale - window.innerHeight);
+    const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    const availableHeight = monitor ? monitor.workArea.size.height / monitor.scaleFactor - 24 : pageHeight + chromeHeight;
+    const targetHeight = Math.max(480, Math.min(availableHeight, pageHeight + chromeHeight + 2));
+    await win.setSize(new LogicalSize(outerWidth, targetHeight));
+    initialWindowFitted = true;
+  } catch (error) {
+    console.warn('Initial settings window fit unavailable', error);
+  } finally {
+    fittingInitialWindow = false;
+  }
+}
 
 for (const id of petIds) {
   const card = document.createElement('article');
@@ -148,34 +170,42 @@ for (const id of petIds) {
   element(`${id}-summon`).addEventListener('click', () => void dispatch({ kind: 'summon', pet: id }));
 }
 
-for (const id of petIds) {
-  const card = document.createElement('article');
-  card.className = 'companion-pet';
-  card.dataset.petId = id;
-  const portrait = id === 'pet-a' ? '/assets/pet-a/portrait-front.png' : '/assets/pet-b/walk-down/01.png';
-  card.innerHTML = `<img class="portrait" src="${portrait}" alt="${petNames[id]}正面"><div class="companion-copy"><h3>${petNames[id]}</h3><p class="hint"><span id="${id}-companion-presence">—</span> · <span id="${id}-companion-activity">—</span></p><progress id="${id}-companion-progress" max="1000" value="0" aria-label="${petNames[id]}个人成长进度"></progress><p id="${id}-companion-summary" class="hint">个人成长 —</p></div>`;
-  element('companions').append(card);
-  const decoration = root.querySelector(`.companion-decoration.${id === 'pet-a' ? 'chen' : 'jiang'}`);
-  if (decoration) card.append(decoration);
+function portraitUrl(id: PetId): string {
+  return id === 'pet-a' ? '/assets/pet-a/portrait-front.png' : '/assets/pet-b/walk-down/01.png';
 }
 
+function decorationMarkup(id: PetId): string {
+  return id === 'pet-a'
+    ? `<span class="companion-decoration chen" aria-hidden="true"><img class="pine" src="/assets/ui/chen-pine.png" alt=""><img class="jade" src="/assets/ui/chen-jade.png" alt=""></span>`
+    : `<span class="companion-decoration jiang" aria-hidden="true"><img class="bamboo" src="/assets/ui/jiang-bamboo.png" alt=""><img class="swallow" src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>`;
+}
+
+function createDailyPerson(id: PetId, kind: 'companion' | 'input'): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'daily-person';
+  card.dataset.petId = id;
+  const subtitle = kind === 'companion'
+    ? `<span id="${id}-companion-presence">—</span> · <span id="${id}-companion-activity">—</span>`
+    : '个人输入';
+  const metrics = kind === 'companion'
+    ? `<progress id="${id}-companion-progress" max="1000" value="0" aria-label="${petNames[id]}个人成长进度"></progress><p id="${id}-companion-summary" class="hint daily-summary">个人成长 —</p>`
+    : `<div class="input-row"><img class="input-icon" src="/assets/ui/keyboard-reference.png" alt=""><span>键盘</span><strong id="${id}-summary-keys">—</strong></div><div class="input-row"><img class="input-icon" src="/assets/ui/mouse-reference.png" alt=""><span>点击</span><strong id="${id}-summary-clicks">—</strong></div>`;
+  card.innerHTML = `<img class="portrait" src="${portraitUrl(id)}" alt="${petNames[id]}正面"><div class="daily-copy"><h3>${petNames[id]}</h3><p class="hint daily-subtitle">${subtitle}</p><div class="daily-metrics">${metrics}</div></div>${decorationMarkup(id)}`;
+  return card;
+}
+
+for (const id of petIds) element('companions').append(createDailyPerson(id, 'companion'));
+
 const bondCompanion = document.createElement('article');
-bondCompanion.className = 'companion-bond';
+bondCompanion.className = 'daily-center companion-bond';
 bondCompanion.innerHTML = `<h3>两人羁绊</h3><div class="hearts" id="bond-hearts" role="meter" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-label="两人羁绊">${'<span class="heart" aria-hidden="true"></span>'.repeat(5)}</div><strong id="bond-companion-score">—</strong><p id="bond-companion-summary" class="hint">共同进度</p>`;
 element('companions').insertBefore(bondCompanion, element('companions').children[1]);
 
-for (const id of petIds) {
-  const card = document.createElement('article');
-  card.className = 'input-pet';
-  card.dataset.petId = id;
-  const portrait = id === 'pet-a' ? '/assets/pet-a/portrait-front.png' : '/assets/pet-b/walk-down/01.png';
-  card.innerHTML = `<img class="portrait" src="${portrait}" alt="${petNames[id]}正面"><div class="input-copy"><h3>${petNames[id]}</h3><p class="hint">个人输入</p><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="${id}-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="${id}-summary-clicks">—</strong></div></div>`;
-  element('input-summary').append(card);
-}
+for (const id of petIds) element('input-summary').append(createDailyPerson(id, 'input'));
 
 const inputTotal = document.createElement('article');
-inputTotal.className = 'input-total';
-inputTotal.innerHTML = `<h3>今日总数</h3><p class="hint">两人合计</p><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="total-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="total-summary-clicks">—</strong></div>`;
+inputTotal.className = 'daily-center input-total';
+inputTotal.innerHTML = `<h3>今日总数</h3><p class="hint">实际输入</p><div class="input-row"><img class="input-icon" src="/assets/ui/keyboard-reference.png" alt=""><span>键盘</span><strong id="total-summary-keys">—</strong></div><div class="input-row"><img class="input-icon" src="/assets/ui/mouse-reference.png" alt=""><span>点击</span><strong id="total-summary-clicks">—</strong></div>`;
 element('input-summary').insertBefore(inputTotal, element('input-summary').children[1]);
 
 // Use the same sprite cleanup as the desktop pets. Export padding and sheet
@@ -229,6 +259,19 @@ function formatError(error: unknown): string {
   if (typeof error === 'string') return error;
   return JSON.stringify(error) || '未知错误';
 }
+function renderHearts(id: string, value: number, target: number, label: string): void {
+  const hearts = element(id);
+  const clamped = Math.min(target, Math.max(0, value));
+  const filled = Math.floor((clamped / target) * 5);
+  hearts.setAttribute('aria-valuemax', String(target));
+  hearts.setAttribute('aria-valuenow', String(clamped));
+  hearts.setAttribute('aria-label', `${label} ${clamped.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`);
+  hearts.querySelectorAll<HTMLElement>('.heart').forEach((heart, index) => {
+    heart.classList.toggle('filled', index < filled);
+    heart.style.setProperty('--heart-fill', `${Math.max(0, Math.min(1, clamped / (target / 5) - index)) * 100}%`);
+    heart.classList.toggle('partial', index === filled && filled < 5 && clamped % (target / 5) > 0);
+  });
+}
 function isStale(error: unknown): boolean {
   return /stale|revision|版本|过期/i.test(formatError(error));
 }
@@ -253,8 +296,6 @@ function onCounts(incoming: InputCounts): void {
 }
 function renderCounters(): void {
   if (!snapshot || disposed) return;
-  let totalKeys = 0;
-  let totalClicks = 0;
   for (const id of petIds) {
     const p = snapshot.pets[id].progress;
     const counts = displayedCounts(snapshot, liveCounts, id);
@@ -262,14 +303,13 @@ function renderCounters(): void {
     element(`${id}-stats`).textContent = `操作次数：按键 ${counts.todayKeys.toLocaleString()} · 点击 ${counts.todayClicks.toLocaleString()} · 今日收益：${formatDailyEarnings(earnings.cappedTotal)} / 800`;
     element(`${id}-summary-keys`).textContent = counts.todayKeys.toLocaleString('zh-CN');
     element(`${id}-summary-clicks`).textContent = counts.todayClicks.toLocaleString('zh-CN');
-    totalKeys += counts.todayKeys;
-    totalClicks += counts.todayClicks;
     for (const key of ['companion', 'keyboard', 'mouse', 'focus', 'unclassified'] as const) {
       element(`${id}-earning-${key}`).textContent = formatDailySourceEarnings(earnings[key]);
     }
   }
-  element('total-summary-keys').textContent = totalKeys.toLocaleString('zh-CN');
-  element('total-summary-clicks').textContent = totalClicks.toLocaleString('zh-CN');
+  const totals = displayedTotalCounts(snapshot, liveCounts);
+  element('total-summary-keys').textContent = totals.todayKeys.toLocaleString('zh-CN');
+  element('total-summary-clicks').textContent = totals.todayClicks.toLocaleString('zh-CN');
   const status = liveCounts && liveCounts.stateRevision >= snapshot.revision ? liveCounts.inputStatus : snapshot.inputStatus;
   element('input-status').textContent = `${snapshot.settings.inputEnabled ? '计数已启用' : '计数已关闭'} · ${inputStatusText(status)}`;
 }
@@ -349,29 +389,17 @@ function render(): void {
   element('growth-unlock-summary').textContent = unlockSummary;
   element('bond-score').textContent = state.bond.value.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
   element('bond-daily').textContent = `今日羁绊 ${state.bond.dailyEarned.toFixed(1)} / 800`;
-  const bondProgress = element<HTMLProgressElement>('bond-progress');
-  bondProgress.max = unlockTarget;
-  bondProgress.value = Math.min(state.bond.value, unlockTarget);
+  renderHearts('bond-growth-hearts', state.bond.value, unlockTarget, '两人羁绊');
   element('bond-companion-score').textContent = state.bond.value.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
   element('bond-companion-summary').textContent = state.stage >= 3 ? '共同阶段已完成' : `${unlockTarget.toLocaleString('zh-CN')} 目标 · ${Math.max(0, Math.ceil(unlockTarget - state.bond.value)).toLocaleString('zh-CN')} 待积累`;
-  const bondHearts = element('bond-hearts');
-  const clampedBond = Math.min(unlockTarget, Math.max(0, state.bond.value));
-  const filledBondHearts = Math.floor((clampedBond / unlockTarget) * 5);
-  bondHearts.setAttribute('aria-valuemax', String(unlockTarget));
-  bondHearts.setAttribute('aria-valuenow', String(clampedBond));
-  bondHearts.setAttribute('aria-label', `两人羁绊 ${clampedBond.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${unlockTarget.toLocaleString('zh-CN')}`);
-  bondHearts.querySelectorAll<HTMLElement>('.heart').forEach((heart, index) => {
-    heart.classList.toggle('filled', index < filledBondHearts);
-    heart.style.setProperty('--heart-fill', `${Math.max(0, Math.min(1, clampedBond / (unlockTarget / 5) - index)) * 100}%`);
-    heart.classList.toggle('partial', index === filledBondHearts && filledBondHearts < 5 && clampedBond % (unlockTarget / 5) > 0);
-  });
+  renderHearts('bond-hearts', state.bond.value, unlockTarget, '两人羁绊');
   const activities = { standing: '站立', working: '工作', sleeping: '睡眠' };
   for (const id of petIds) {
     const pet = state.pets[id];
     const p = pet.progress;
     const target = p.personalGrowth < 1000 ? 1000 : 4000;
     element(`${id}-presence`).textContent = pet.present ? `在场 · ${activities[pet.activity]}` : '离场 · 暂停成长';
-    element(`${id}-companion-presence`).textContent = pet.present ? '在场' : '离场 · 暂停成长';
+    element(`${id}-companion-presence`).textContent = pet.present ? '在场' : '离场';
     element(`${id}-companion-activity`).textContent = pet.present ? activities[pet.activity] : '暂停成长';
     element(`${id}-score`).textContent = p.personalGrowth.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
     element(`${id}-target`).textContent = p.personalGrowth >= 4000 ? '第二档个人里程碑已达成' : `${target.toLocaleString()} 个人目标 · 还差 ${Math.max(0, Math.ceil(target - p.personalGrowth)).toLocaleString()}`;
@@ -593,6 +621,7 @@ async function connectOrRefresh(): Promise<void> {
     root.setAttribute('aria-busy', 'false');
     element<HTMLButtonElement>('refresh').disabled = false;
     render();
+    void fitInitialWindow();
   }
 }
 window.addEventListener('pagehide', () => {

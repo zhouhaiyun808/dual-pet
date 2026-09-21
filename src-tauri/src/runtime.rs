@@ -13,6 +13,7 @@ pub struct InputCounts {
     pub sequence: u64,
     pub state_revision: u64,
     pub input_status: String,
+    pub total: PetCounts,
     pub pets: BTreeMap<PetId, PetCounts>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -47,6 +48,8 @@ impl Session {
         let snapshot = self.core.snapshot();
         let mut frame = InputCounts { sequence: self.counts.as_ref().map_or(0, |c| c.sequence),
             state_revision: snapshot.revision, input_status: status,
+            total: PetCounts { day: snapshot.input_totals.day.clone(),
+                today_keys: snapshot.input_totals.today_keys, today_clicks: snapshot.input_totals.today_clicks },
             pets: snapshot.pets.iter().map(|(id, p)| (*id, PetCounts { day: p.progress.day.clone(),
                 today_keys: p.progress.today_keys, today_clicks: p.progress.today_clicks })).collect() };
         if self.counts.as_ref() != Some(&frame) { frame.sequence = frame.sequence.saturating_add(1); }
@@ -194,6 +197,7 @@ mod tests {
         let first = runtime.pulse_at(start + std::time::Duration::from_millis(32), clock(0)).unwrap();
         assert!(first.snapshot.is_none());
         let first = first.counts.unwrap();
+        assert_eq!((first.total.today_keys, first.total.today_clicks), (3, 2));
         assert_eq!(first.pets[&PetId::A].today_keys, 3);
         assert_eq!(first.pets[&PetId::B].today_clicks, 2);
         assert_eq!(runtime.snapshot().unwrap().pets[&PetId::A].progress.today_keys, 3);
@@ -203,6 +207,7 @@ mod tests {
         let second = runtime.pulse_at(start + std::time::Duration::from_millis(96), clock(0)).unwrap().counts.unwrap();
         assert!(second.sequence > first.sequence);
         assert_eq!(second.pets[&PetId::A].today_keys, 8);
+        assert_eq!(second.total.today_keys, 8);
     }
     #[test]
     fn fast_input_pulses_do_not_multiply_companion_time_or_minute_bonuses() {
@@ -243,6 +248,7 @@ mod tests {
         assert_eq!(core.snapshot().pets[&PetId::B].progress, closed);
         settle(&mut core, batch(30), clock(3), 1.0);
         let snapshot = core.snapshot();
+        assert_eq!((snapshot.input_totals.today_keys, snapshot.input_totals.today_clicks), (60, 6));
         assert_eq!(snapshot.pets[&PetId::A].progress.key_presses, 60);
         assert_eq!(snapshot.pets[&PetId::B].progress.key_presses, 40);
         assert_eq!(snapshot.pets[&PetId::A].progress.mouse_clicks, 6);

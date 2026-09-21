@@ -12,6 +12,7 @@ registerHooks({
     if (specifier.startsWith('@tauri-apps/api/')) return {url: `mock:${specifier.split('/').at(-1)}`, shortCircuit: true};
     if (specifier === './assets' && context.parentURL?.endsWith('window-pet.ts')) return {url: 'mock:assets', shortCircuit: true};
     if (specifier === './window-geometry') return next('./window-geometry.ts', context);
+    if (specifier.startsWith('./') && !specifier.match(/\.[a-z]+$/i) && context.parentURL?.endsWith('.ts')) return next(`${specifier}.ts`, context);
     return next(specifier, context);
   },
   load(url, context, next) {
@@ -29,7 +30,7 @@ class LogicalPosition extends Position {}
 class PhysicalPosition extends Position {}
 class LogicalSize {constructor(width,height) {this.width=width;this.height=height;} }
 const windows = new Map();
-let active, cursor, menus, sleeping, owner, display;
+let active, cursor, menus, sleeping, owner, display, state;
 let clearedSelections;
 const listeners = new Map();
 const native = {
@@ -41,6 +42,17 @@ const native = {
   cursorPosition: async () => cursor,
   listen: async () => () => {},
   async invoke(command, args) {
+    if (command === 'get_app_state') return structuredClone(state);
+    if (command === 'get_double_click_interval') return 300;
+    if (command === 'dispatch_action') {
+      const action=args.action; const id=action.pet ?? active.label;
+      if(action.kind==='activity') state.pets[id].activity=action.activity;
+      if(action.kind==='join') {state.pair={owner:id,mode:'face-dialogue',ownLeft:action.ownLeft??true,bedColor:'green'}; owner=id; windows.get(id==='pet-a'?'pet-b':'pet-a').visible=false;}
+      if(action.kind==='split') {state.pair=null;owner=null;windows.get(id==='pet-a'?'pet-b':'pet-a').visible=true;}
+      if(action.kind==='pair-sleep-toggle' && state.pair) state.pair.mode=state.pair.mode==='double-sleep'?'kiss':'double-sleep';
+      if(action.kind==='pair-cycle' && state.pair) state.pair.mode=state.pair.mode==='shared-work'?'double-sleep':state.pair.mode==='double-sleep'?'kiss':'shared-work';
+      state.revision++; return structuredClone(state);
+    }
     if (command === 'set_sleeping') sleeping.set(active.label,args.sleeping);
     if (command === 'show_pet_menu') menus.push(args);
     if (command === 'join_pair') {
@@ -83,6 +95,8 @@ function element() {
 async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
   windows.clear(); listeners.clear(); menus=[]; sleeping=new Map(); owner=null;
   display={position:{x:0,y:0},size:{width:3584,height:2240},workArea:{position:{x:0,y:50},size:{width:3584,height:2190}},scaleFactor:2};
+  const progress={day:'2026-09-14',personalGrowth:0,dailyEarned:0,dailyFocusEarned:0,keyPresses:0,mouseClicks:0,todayKeys:0,todayClicks:0,companionSeconds:0,slept:false,faceCompleted:false,workedTogether:false,kissed:false};
+  state={revision:1,pets:{'pet-a':{present:true,activity:'standing',progress:{...progress}},'pet-b':{present:true,activity:'standing',progress:{...progress}}},pair:null,stage:3,settings:{bubblesEnabled:true},pomodoro:{phase:'idle'},dialogue:null,sleepSlot:null,inputStatus:'listening',storageWarning:null,unlockedDialogues:[]};
   function make(label,scale) {
     return {label,dpi:scale,position:{x:200*scale,y:100*scale},size:{width:112*scale,height:144*scale},visible:true,
       async outerPosition(){return this.position;}, async outerSize(){return this.size;}, async scaleFactor(){return this.dpi;},
@@ -93,13 +107,13 @@ async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
     };
   }
   active=make('pet-a',dpi); windows.set('pet-a',active); windows.set('pet-b',make('pet-b',guestDpi)); cursor={x:200,y:200};
-  const petElement=element(), doc=element();
+  const petElement=element(), bubble={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, status={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, doc=element();
   const context=new Proxy({}, {get:()=>()=>{},set:()=>true});
   const canvas={width:0,height:0,getContext:()=>context};
-  doc.querySelector=selector=>selector==='#pet-image'?canvas:petElement;
+  doc.querySelector=selector=>selector==='#pet-image'?canvas:selector==='#dialogue-bubble'?bubble:selector==='#pet-status'?status:petElement;
   globalThis.document=doc;
   clearedSelections=0;
-  globalThis.window={devicePixelRatio:dpi,setInterval:()=>1,clearInterval(){},getSelection:()=>({removeAllRanges(){clearedSelections++;}})};
+  globalThis.window={devicePixelRatio:dpi,setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout,getSelection:()=>({removeAllRanges(){clearedSelections++;}})};
   Object.defineProperty(globalThis,'navigator',{value:{userAgent:platform},configurable:true});
   globalThis.localStorage={setItem(){}};
   const profile={config:{id:'pet-a',partnerId:'pet-b',baseSize:80,frameMs:100},scale:1,minScale:.55,maxScale:4};
@@ -110,9 +124,9 @@ const settle = async () => {for(let i=0;i<8;i++) await new Promise(resolve=>setI
 
 test('static canvas repaints after Retina scale changes without an animation', async () => {
   const {pet,canvas}=await setup();
-  assert.equal(canvas.width,160);
+  assert.equal(canvas.width,232);
   window.devicePixelRatio=1; pet.paint(100);
-  assert.equal(canvas.width,80); pet.destroy();
+  assert.equal(canvas.width,116); pet.destroy();
 });
 test('Control-click opens menu but never begins dragging or toggles sleep', async () => {
   const {pet,petElement,doc}=await setup();
@@ -126,27 +140,24 @@ test('Mac recovery uses primary logical coordinates even when window was on a 1x
   pet.paired=true;pet.sleeping=true;profile.scale=2;
   await listeners.get('pet-a:pet-recover')({payload:null}); await settle();
   assert(win.lastPosition instanceof LogicalPosition);
-  assert.equal(win.lastPosition.x,1668); assert.equal(pet.paired,true); assert.equal(pet.sleeping,true);assert.equal(profile.scale,2); pet.destroy();
+  assert.equal(win.lastPosition.x,1632); assert.equal(pet.paired,true); assert.equal(pet.sleeping,true);assert.equal(profile.scale,2); pet.destroy();
 });
-test('all four pair outcomes preserve directional bed rules', async () => {
-  for(const dragged of [false,true]) for(const stationary of [false,true]) {
-    const {pet,win}=await setup(2,1);
-    pet.sleeping=dragged;sleeping.set('pet-a',dragged);sleeping.set('pet-b',stationary);
-    // Place both windows at the same logical location despite different backing scales.
-    win.position={x:400,y:200}; windows.get('pet-b').position={x:200,y:100};
-    await pet.tryJoin();
-    assert.equal(pet.paired,true);assert.equal(pet.sleeping,stationary);
-    if(stationary)assert.equal(pet.bedColor,dragged?'green':'blue');
-    assert.equal(windows.get('pet-b').visible,false);
-    await pet.split();assert.equal(pet.sleeping,false);assert.equal(pet.paired,false);assert.equal(windows.get('pet-b').visible,true);
-    pet.destroy();
+test('single and paired activity cycles keep one stable drawing envelope', async () => {
+  const {pet,canvas}=await setup();
+  const single=pet.geometry();
+  for(const activity of ['working','sleeping','standing']) {
+    pet.working=activity==='working'; pet.sleeping=activity==='sleeping'; pet.lastPaint=''; pet.paint(performance.now());
+    assert.deepEqual(pet.geometry(),single);
+    assert.deepEqual([canvas.width,canvas.height],[single.width*2,single.height*2]);
   }
-});
-test('sleep resize failure rolls back frontend and native sleeping state', async t => {
-  t.mock.method(console, 'error', () => {});
-  const {pet,win}=await setup();win.failResize=true;
-  await assert.rejects(pet.menuAction('sleep'), /resize failed/);
-  assert.equal(pet.sleeping,false);assert.equal(sleeping.get('pet-a'),false);assert.equal(pet.busy,false);pet.destroy();
+  pet.paired=true;
+  const paired=pet.geometry();
+  for(const mode of ['face','work','sleep','kiss']) {
+    pet.faceMode=mode==='face';pet.working=mode==='work';pet.sleeping=mode==='sleep';pet.lastPaint='';pet.paint(performance.now());
+    assert.deepEqual(pet.geometry(),paired);
+    assert.deepEqual([canvas.width,canvas.height],[paired.width*2,paired.height*2]);
+  }
+  pet.destroy();
 });
 test('quick release flushes the final pointer location before clearing drag', async () => {
   const {pet,petElement,win}=await setup();
@@ -159,13 +170,15 @@ test('quick release flushes the final pointer location before clearing drag', as
   assert.equal(pet.pointer,null);pet.destroy();
 });
 
-test('paired menu sleep can select either bed independently of drag bed rules', async t => {
-  const {pet}=await setup();pet.paired=true;
-  t.mock.method(Math, 'random', () => .1);
-  await pet.menuAction('sleep');assert.equal(pet.bedColor,'green');
-  await pet.menuAction('sleep');
-  Math.random.mock.mockImplementation(() => .9);
-  await pet.menuAction('sleep');assert.equal(pet.bedColor,'blue');pet.destroy();
+test('entering single standing resets a dragged pet to the initial front frame', async () => {
+  const {pet}=await setup();
+  pet.direction='right'; pet.frame=7; pet.lastMovement=123;
+  state.pets['pet-a'].activity='working'; state.revision++;
+  pet.enqueueSnapshot(structuredClone(state)); await pet.snapshotWork;
+  state.pets['pet-a'].activity='standing'; state.revision++;
+  pet.enqueueSnapshot(structuredClone(state)); await pet.snapshotWork;
+  assert.equal(pet.direction,'down');assert.equal(pet.frame,0);assert.equal(pet.lastMovement,0);
+  pet.destroy();
 });
 
 test('pointer cancellation never combines pets and releases drag state', async () => {
@@ -243,11 +256,11 @@ test('selection and native image dragging are blocked, then listeners are cleane
   assert.equal(afterDestroy.defaultPrevented, false);
 });
 
-test('normal double-click keeps the existing sleep action while suppressing browser default', async () => {
+test('normal double-click follows the same state cycle while suppressing browser default', async () => {
   const {pet, petElement}=await setup();
   const dblclick = await petElement.fire('dblclick');
   await settle();
   assert.equal(dblclick.defaultPrevented, true);
-  assert.equal(pet.sleeping, true);
+  assert.equal(pet.working, true);
   pet.destroy();
 });

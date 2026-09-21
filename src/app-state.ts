@@ -8,6 +8,7 @@ export interface Progress {
   companionSeconds: number; slept: boolean; faceCompleted: boolean; workedTogether: boolean; kissed: boolean;
 }
 export interface Bond { value: number; day: string; dailyEarned: number }
+export interface InputTotals { day: string; todayKeys: number; todayClicks: number }
 export interface PetRecord { present: boolean; activity: Activity; progress: Progress }
 export interface Settings {
   focusMinutes: number; breakMinutes: number; longBreakMinutes: number;
@@ -23,7 +24,7 @@ export interface DialogueLine { speaker: PetId | 'system'; text: string }
 export interface Dialogue { id: number; lines: DialogueLine[]; index: number; remainingSeconds: number; kind: string }
 export interface AppSnapshot {
   revision: number; pets: Record<PetId, PetRecord>; pair: PairRecord | null;
-  bond: Bond; stage: number; settings: Settings; pomodoro: Pomodoro; dialogue: Dialogue | null;
+  bond: Bond; inputTotals: InputTotals; stage: number; settings: Settings; pomodoro: Pomodoro; dialogue: Dialogue | null;
   sleepSlot: string | null; inputStatus: string; storageWarning: string | null;
   unlockedDialogues: string[];
 }

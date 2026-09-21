@@ -42,6 +42,8 @@ export function createPreviewState(scenario: PreviewScenario, keys = 0, clicks =
     pets: { 'pet-a': { present: true, activity: 'working', progress: progress('pet-a') },
       'pet-b': { present: scenario !== 'away', activity: 'standing', progress: progress('pet-b') } },
     bond: { value: scenario === 'capped' ? 2500 : 420, day: '2026-09-14', dailyEarned: scenario === 'capped' ? 800 : 12 },
+    inputTotals: { day: '2026-09-14', todayKeys: (scenario === 'capped' ? 3600 : 1200) + keys,
+      todayClicks: (scenario === 'capped' ? 720 : 320) + clicks },
     pair: null, stage: 1,
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 15, autoNext: false,
       longBreakEnabled: true, lunchEnabled: true, nightEnabled: true, inputEnabled: true, bubblesEnabled: true },
@@ -52,6 +54,6 @@ export function createPreviewState(scenario: PreviewScenario, keys = 0, clicks =
     const p = snapshot.pets[id].progress;
     return { day: p.day, todayKeys: p.todayKeys, todayClicks: p.todayClicks };
   };
-  return { snapshot, counts: { sequence: 1, stateRevision: 1, inputStatus,
+  return { snapshot, counts: { sequence: 1, stateRevision: 1, inputStatus, total: { ...snapshot.inputTotals },
     pets: { 'pet-a': count('pet-a'), 'pet-b': count('pet-b') } } };
 }

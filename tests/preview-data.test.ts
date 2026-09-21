@@ -21,6 +21,7 @@ test('all scenarios provide independent complete snapshots matching lightweight 
       const e = dailyEarningsBreakdown(p);
       assert.equal(e.total, e.companion + e.keyboard + e.mouse + e.focus + e.unclassified);
     }
+    assert.deepEqual(counts.total, snapshot.inputTotals);
     assert.equal(snapshot.inputStatus, counts.inputStatus);
   }
   const first = createPreviewState('normal');
@@ -35,6 +36,8 @@ test('normal input fixtures credit both present pets without splitting', () => {
     assert.equal(p.todayKeys, 1260); assert.equal(p.todayClicks, 332);
     assert.equal(p.dailyEarned, 27);
   }
+  assert.equal(snapshot.inputTotals.todayKeys, 1260);
+  assert.equal(snapshot.inputTotals.todayClicks, 332);
 });
 test('away and closed input gates do not show catch-up growth', () => {
   const away = createPreviewState('away', 60, 12).snapshot;

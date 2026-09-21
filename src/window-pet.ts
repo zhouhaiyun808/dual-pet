@@ -178,6 +178,14 @@ export class WindowPet {
       this.paired = pair?.owner === id;
       this.faceMode = this.paired && pair?.mode === 'face-dialogue';
       this.ownLeft = this.paired ? pair!.ownLeft : true;
+      if (!this.paired && next.pets[id].activity === 'standing'
+        && (!previous || previous.pair || previous.pets[id].activity !== 'standing')) {
+        this.direction = 'down';
+        this.frame = 0;
+        this.lastFrame = 0;
+        this.lastMovement = 0;
+        this.lastPaint = '';
+      }
       this.sleeping = this.paired ? pair!.mode === 'double-sleep' : next.pets[id].activity === 'sleeping';
       const wasWorking = this.working;
       this.working = this.paired ? pair!.mode === 'shared-work' : next.pets[id].activity === 'working';
@@ -255,7 +263,7 @@ export class WindowPet {
     const prefix = this.faceMode ? 'face' : 'kiss';
     return [this.sprites.get(getStaticFrame(left, `${prefix}-right`))!, this.sprites.get(getStaticFrame(right, `${prefix}-left`))!];
   }
-  private geometry() {
+  private contentGeometry() {
     const height = this.size();
     if (this.working) {
       const scene = sceneForPet(this.profile.config.id, this.paired);
@@ -265,12 +273,51 @@ export class WindowPet {
       return { width: Math.ceil(workHeight * aspect), height: workHeight };
     }
     if (this.sleeping) {
-      const bed = this.sprites.get(getBedFrame(this.paired ? this.bedColor : 'green', this.paired));
+      const bed = this.sprites.get(getBedFrame(this.bedColor, this.paired));
       if (bed) return { width: Math.ceil(height * 1.45 * bed.width / bed.height), height: Math.ceil(height * 1.45) };
     }
     if (!this.paired) return { width: height, height: Math.ceil(height * 1.1) };
     const [a, b] = this.pairSprites();
     return { width: Math.ceil(height * (a.width / a.height + b.width / b.height + (this.faceMode ? .15 : -.035))), height };
+  }
+  private geometry() {
+    const size = this.size();
+    const dimensions: Array<{ width: number; height: number }> = [];
+    if (this.paired) {
+      for (const faceMode of [false, true]) {
+        for (const ownLeft of [false, true]) {
+          const left = ownLeft ? this.profile.config.id : this.profile.config.partnerId;
+          const right = ownLeft ? this.profile.config.partnerId : this.profile.config.id;
+          const prefix = faceMode ? 'face' : 'kiss';
+          const a = this.sprites.get(getStaticFrame(left, `${prefix}-right`));
+          const b = this.sprites.get(getStaticFrame(right, `${prefix}-left`));
+          if (a && b) dimensions.push({
+            width: Math.ceil(size * (a.width / a.height + b.width / b.height + (faceMode ? .15 : -.035))),
+            height: size,
+          });
+        }
+      }
+      const work = this.workSprites.get(getWorkFrameUrl('dual-jiangchen', 'idle'));
+      if (work) dimensions.push({ width: Math.ceil(size * work.width / work.height), height: size });
+      for (const color of ['green', 'blue'] as const) {
+        const bed = this.sprites.get(getBedFrame(color, true));
+        if (bed) dimensions.push({ width: Math.ceil(size * 1.45 * bed.width / bed.height), height: Math.ceil(size * 1.45) });
+      }
+    } else {
+      dimensions.push({ width: size, height: Math.ceil(size * 1.1) });
+      for (const scene of ['solo-chen', 'solo-jiang'] as const) {
+        const work = this.workSprites.get(getWorkFrameUrl(scene, 'idle'));
+        if (work) dimensions.push({ width: Math.ceil(size * work.width / work.height), height: size });
+      }
+      for (const color of ['green', 'blue'] as const) {
+        const bed = this.sprites.get(getBedFrame(color, false));
+        if (bed) dimensions.push({ width: Math.ceil(size * 1.45 * bed.width / bed.height), height: Math.ceil(size * 1.45) });
+      }
+    }
+    return dimensions.reduce((envelope, item) => ({
+      width: Math.max(envelope.width, item.width),
+      height: Math.max(envelope.height, item.height),
+    }), { width: 1, height: 1 });
   }
   private layout() {
     this.layoutWork = this.layoutWork.catch(console.error).then(async () => {
@@ -314,6 +361,9 @@ export class WindowPet {
     if (key === this.lastPaint) return;
     this.lastPaint = key;
     const { width, height } = this.geometry();
+    const content = this.contentGeometry();
+    const contentX = Math.round((width - content.width) / 2);
+    const contentY = height - content.height;
     const backingWidth = Math.round(width * dpi), backingHeight = Math.round(height * dpi);
     if (this.canvas.width !== backingWidth || this.canvas.height !== backingHeight) { this.canvas.width = backingWidth; this.canvas.height = backingHeight; }
     const ctx = this.canvas.getContext('2d')!;
@@ -321,21 +371,25 @@ export class WindowPet {
     ctx.clearRect(0, 0, width, height); ctx.imageSmoothingEnabled = false;
     if (this.working) {
       const sprite = workUrl ? this.workSprites.get(workUrl) : undefined;
-      if (sprite && workScene) paintWorkScene(ctx, width, height, workScene, sprite);
+      if (sprite && workScene) {
+        ctx.save();
+        ctx.translate(contentX, contentY);
+        paintWorkScene(ctx, content.width, content.height, workScene, sprite);
+        ctx.restore();
+      }
       return;
     }
     if (this.sleeping) {
       const bed = this.sprites.get(getBedFrame(this.bedColor, this.paired));
       if (!bed) return;
-      const reference = this.paired ? bed : this.sprites.get(getBedFrame('green', false))!;
-      const bedHeight = height, bedWidth = reference.width * bedHeight / reference.height;
-      const bedX = (width - bedWidth) / 2;
-      ctx.drawImage(bed.image, bed.x, bed.y, bed.width, bed.height, bedX, 0, bedWidth, bedHeight);
+      const bedHeight = content.height, bedWidth = bed.width * bedHeight / bed.height;
+      const bedX = contentX + (content.width - bedWidth) / 2;
+      ctx.drawImage(bed.image, bed.x, bed.y, bed.width, bed.height, bedX, contentY, bedWidth, bedHeight);
       // The cream folded quilt begins just below the pillows in each bed sheet.
-      const quiltY = height * (this.bedColor === 'green' ? .35 : .32);
+      const quiltY = contentY + content.height * (this.bedColor === 'green' ? .35 : .32);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(0, 0, width, quiltY);
+      ctx.rect(contentX, contentY, content.width, quiltY - contentY);
       ctx.clip();
       const drawSleeper = (id: string, center: number) => {
         const sleeper = this.sprites.get(getStaticFrame(id, 'sleep')); if (!sleeper) return;
@@ -345,21 +399,21 @@ export class WindowPet {
           center - sleeperWidth / 2, quiltY - sleeperHeight * .40, sleeperWidth, sleeperHeight);
       };
       if (this.paired) { drawSleeper('pet-a', bedX + bedWidth * .34); drawSleeper('pet-b', bedX + bedWidth * .66); }
-      else drawSleeper(this.profile.config.id, width / 2);
+      else drawSleeper(this.profile.config.id, contentX + content.width / 2);
       ctx.restore();
       return;
     }
     if (this.paired) {
       const [a, b] = this.pairSprites();
-      const aw = a.width * height / a.height;
-      ctx.drawImage(a.image, a.x, a.y, a.width, a.height, 0, 0, aw, height);
-      ctx.drawImage(b.image, b.x, b.y, b.width, b.height, aw + height * (this.faceMode ? .15 : -.035), 0, b.width * height / b.height, height);
+      const aw = a.width * content.height / a.height;
+      ctx.drawImage(a.image, a.x, a.y, a.width, a.height, contentX, contentY, aw, content.height);
+      ctx.drawImage(b.image, b.x, b.y, b.width, b.height, contentX + aw + content.height * (this.faceMode ? .15 : -.035), contentY, b.width * content.height / b.height, content.height);
     } else {
       const sprite = this.sprites.get(url); if (!sprite) return;
       const unit = this.size() / this.referenceHeight;
       const drawWidth = Math.round(sprite.width * unit), drawHeight = Math.round(sprite.height * unit);
       ctx.drawImage(sprite.image, sprite.x, sprite.y, sprite.width, sprite.height,
-        Math.round((width - drawWidth) / 2), height - drawHeight, drawWidth, drawHeight);
+        Math.round(contentX + (content.width - drawWidth) / 2), contentY + content.height - drawHeight, drawWidth, drawHeight);
     }
   }
   private queuePosition(position: PhysicalPosition | LogicalPosition) {

@@ -4,7 +4,13 @@ export interface InputCounts {
   sequence: number;
   stateRevision: number;
   inputStatus: string;
+  total: { day: string; todayKeys: number; todayClicks: number };
   pets: Record<PetId, { day: string; todayKeys: number; todayClicks: number }>;
+}
+export function displayedTotalCounts(snapshot: AppSnapshot, live: InputCounts | null) {
+  const saved = snapshot.inputTotals;
+  const fresh = live && live.stateRevision >= snapshot.revision && live.total.day === saved.day;
+  return fresh ? live.total : saved;
 }
 export function acceptCounts(current: InputCounts | null, incoming: InputCounts): InputCounts {
   return !current || incoming.sequence > current.sequence ? incoming : current;

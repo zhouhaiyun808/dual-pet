@@ -87,6 +87,14 @@ pub struct Bond {
     pub daily_earned: f64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InputTotals {
+    pub day: String,
+    pub today_keys: u64,
+    pub today_clicks: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PetRecord { pub present: bool, pub activity: Activity, pub progress: Progress }
@@ -179,6 +187,8 @@ pub struct AppSnapshot {
     pub pets: BTreeMap<PetId, PetRecord>,
     #[serde(default)]
     pub bond: Bond,
+    #[serde(default)]
+    pub input_totals: InputTotals,
     pub pair: Option<PairRecord>,
     pub stage: u8,
     pub settings: Settings,
@@ -274,6 +284,7 @@ impl Core {
         let mut core = Self {
             state: AppSnapshot { revision: 0, pets,
                 bond: Bond { day: clock.local_date.clone(), ..Bond::default() },
+                input_totals: InputTotals { day: clock.local_date.clone(), ..InputTotals::default() },
                 pair: None, stage: 1,
                 settings, pomodoro: Pomodoro::default(), dialogue: None,
                 sleep_slot: None, input_status: "unavailable".into(),
@@ -315,6 +326,7 @@ impl Core {
 
     pub fn from_save(mut saved: CoreSave, clock: Clock) -> Result<Self, String> {
         saved.migrate_legacy_bond();
+        saved.migrate_legacy_input_totals();
         saved.validate()?;
         let mut core = Self::new(clock.clone());
         core.state = saved.snapshot;
@@ -572,6 +584,11 @@ impl Core {
             self.state.bond.day = day.into();
             self.state.bond.daily_earned = 0.0;
         }
+        if self.state.input_totals.day.as_str() < day {
+            self.state.input_totals.day = day.into();
+            self.state.input_totals.today_keys = 0;
+            self.state.input_totals.today_clicks = 0;
+        }
         for id in PetId::ALL {
             let p = &mut self.pet_mut(id).progress;
             // ISO dates compare chronologically. Clock reversal cannot reset caps.
@@ -617,6 +634,8 @@ impl Core {
     }
 
     fn award_input(&mut self, keys: u64, clicks: u64, minute: i64) {
+        self.state.input_totals.today_keys = self.state.input_totals.today_keys.saturating_add(keys);
+        self.state.input_totals.today_clicks = self.state.input_totals.today_clicks.saturating_add(clicks);
         for id in PetId::ALL {
             if !self.pet(id).present { continue; }
             let p = &mut self.pet_mut(id).progress;
@@ -941,6 +960,22 @@ impl CoreSave {
         };
     }
 
+    pub(crate) fn migrate_legacy_input_totals(&mut self) {
+        if !self.snapshot.input_totals.day.is_empty() { return; }
+        let day = PetId::ALL.into_iter().find_map(|id| self.snapshot.pets.get(&id).map(|pet| pet.progress.day.clone()))
+            .unwrap_or_default();
+        self.snapshot.input_totals = InputTotals { day, ..InputTotals::default() };
+        for id in PetId::ALL {
+            if let Some(pet) = self.snapshot.pets.get_mut(&id) {
+                pet.progress.key_presses = 0;
+                pet.progress.mouse_clicks = 0;
+                pet.progress.today_keys = 0;
+                pet.progress.today_clicks = 0;
+            }
+        }
+        self.minute_budgets.clear();
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.snapshot.settings.validate()?;
         if self.snapshot.pets.len() != 2 || PetId::ALL.iter().any(|id| !self.snapshot.pets.contains_key(id)) {
@@ -952,6 +987,9 @@ impl CoreSave {
             || [bond.value, bond.daily_earned].into_iter().any(|n| !n.is_finite() || n < 0.0)
             || bond.daily_earned > DAILY_LIMIT {
             return Err("invalid bond in save".into());
+        }
+        if parse_date(&self.snapshot.input_totals.day).is_none() {
+            return Err("invalid input totals in save".into());
         }
         for pet in self.snapshot.pets.values() {
             let p = &pet.progress;
@@ -1062,6 +1100,21 @@ mod tests {
         c.award_input(60, 12, 10);
         near(c.pet(PetId::A).progress.daily_earned, 7.0);
         c.save_data().validate().unwrap();
+    }
+    #[test]
+    fn device_input_totals_count_each_batch_once_across_presence_and_day_rollover() {
+        let mut c = Core::new(clock());
+        c.award_input(8, 3, 10);
+        assert_eq!((c.state.input_totals.today_keys, c.state.input_totals.today_clicks), (8, 3));
+        assert_eq!(c.pet(PetId::A).progress.today_keys, 8);
+        assert_eq!(c.pet(PetId::B).progress.today_keys, 8);
+        c.pet_mut(PetId::B).present = false;
+        c.award_input(5, 2, 11);
+        assert_eq!((c.state.input_totals.today_keys, c.state.input_totals.today_clicks), (13, 5));
+        assert_eq!(c.pet(PetId::A).progress.today_keys, 13);
+        assert_eq!(c.pet(PetId::B).progress.today_keys, 8);
+        c.roll_day("2026-09-15");
+        assert_eq!(c.state.input_totals, InputTotals { day: "2026-09-15".into(), ..InputTotals::default() });
     }
     #[test]
     fn daily_source_cap_allocates_only_actual_input_award() {
