@@ -6,7 +6,7 @@ import { petNames } from './app-state';
 import { dialogueCatalogue } from './dialogue-catalog';
 import { acceptCounts, displayedCounts, displayedTotalCounts, inputStatusText, type InputCounts } from './live-counts';
 import { dailyEarningsBreakdown, formatDailyEarnings, formatDailySourceEarnings } from './growth-details';
-import { isCounterPreview } from './counter-logic';
+import { isBrowserPreview } from './preview-logic';
 import { connectPreview } from './preview-bridge';
 import { renderPixelTime } from './pixel-time';
 import { loadSprite } from './assets';
@@ -15,7 +15,7 @@ import './settings.css';
 
 const root = document.querySelector<HTMLElement>('#settings-app')!;
 const hasTauri = '__TAURI_INTERNALS__' in window;
-const preview = isCounterPreview(hasTauri, location.search);
+const preview = isBrowserPreview(hasTauri, location.search);
 const petIds: PetId[] = ['pet-a', 'pet-b'];
 let stopPreview: (() => void) | undefined;
 root.innerHTML = `
@@ -95,7 +95,7 @@ root.innerHTML = `
       <div class="section-head"><h2 id="feature-settings-heading" class="ornament-heading">功能设置</h2></div>
       <div class="checks"><label class="check"><input type="checkbox" data-setting="inputEnabled" disabled>键鼠计数</label><label class="check"><input type="checkbox" data-setting="bubblesEnabled" disabled>对话泡泡</label></div>
       <p id="input-health" class="hint"></p>
-      <div class="actions settings-actions"><button id="open-counter" type="button">打开桌面计数面板</button><button id="input-access" type="button" disabled>申请或检查输入监控权限</button></div>
+      <div class="actions settings-actions"><button id="input-access" type="button" disabled>申请或检查输入监控权限</button></div>
       <p class="hint" style="margin-top:8px">仅累计按键次数与鼠标左、中、右键点击；不记录文字、位置或正在使用的软件。未授权仍可放置成长。</p>
     </section>
     <section class="card" aria-labelledby="connection-heading">
@@ -128,7 +128,7 @@ let busy = false;
 let unlisten: UnlistenFn | undefined;
 let unlistenCounts: UnlistenFn | undefined;
 let liveCounts: InputCounts | null = null;
-let counterFrame: number | null = null;
+let inputRenderFrame: number | null = null;
 let disposed = false;
 const dirty = new Set<keyof Settings>();
 const editVersions = new Map<keyof Settings, number>();
@@ -291,8 +291,8 @@ async function refresh(): Promise<void> {
 function onCounts(incoming: InputCounts): void {
   if (disposed) return;
   liveCounts = acceptCounts(liveCounts, incoming);
-  if (counterFrame !== null) return;
-  counterFrame = requestAnimationFrame(() => { counterFrame = null; renderCounters(); });
+  if (inputRenderFrame !== null) return;
+  inputRenderFrame = requestAnimationFrame(() => { inputRenderFrame = null; renderCounters(); });
 }
 function renderCounters(): void {
   if (!snapshot || disposed) return;
@@ -578,12 +578,6 @@ element('input-access').addEventListener('click', async () => {
   } catch (error) { showError(`权限请求或状态刷新失败：${formatError(error)}`); }
   finally { busy = false; render(); }
 });
-element('open-counter').addEventListener('click', () => {
-  if (!hasTauri) return;
-  showError('');
-  void invoke('open_counter').catch(error => showError(`无法打开桌面计数面板：${formatError(error)}`));
-});
-
 async function connectOrRefresh(): Promise<void> {
   if (!hasTauri) {
     if (preview && !stopPreview) stopPreview = connectPreview(state => {
@@ -627,6 +621,6 @@ async function connectOrRefresh(): Promise<void> {
 window.addEventListener('pagehide', () => {
   stopPreview?.();
   disposed = true; unlisten?.(); unlistenCounts?.(); unlisten = undefined; unlistenCounts = undefined;
-  if (counterFrame !== null) cancelAnimationFrame(counterFrame);
+  if (inputRenderFrame !== null) cancelAnimationFrame(inputRenderFrame);
 }, { once: true });
 void connectOrRefresh();

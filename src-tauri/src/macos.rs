@@ -52,9 +52,8 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
     let tray_icon = tauri::include_image!("icons/32x32.png");
     let recover = MenuItemBuilder::with_id("pet-recover", "找回桌宠").build(app)?;
     let settings = MenuItemBuilder::with_id("pet-settings", "陪伴设置与成长进度").build(app)?;
-    let counter = MenuItemBuilder::with_id("pet-counter", "今日操作计数面板").build(app)?;
     let quit = MenuItemBuilder::with_id("pet-quit", "退出桌宠（两人）").build(app)?;
-    let menu = MenuBuilder::new(app).items(&[&recover, &settings, &counter, &quit]).build()?;
+    let menu = MenuBuilder::new(app).items(&[&recover, &settings, &quit]).build()?;
 
     // Accessory is enabled only after this succeeds. This leaves a failed tray
     // setup as an ordinary app instead of creating an unreachable background app.
@@ -71,12 +70,6 @@ pub(crate) fn setup(app: &mut tauri::App) -> tauri::Result<()> {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = super::open_settings(app).await { eprintln!("Could not open settings: {error}"); }
-                });
-            }
-            "pet-counter" => {
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = super::open_counter(app).await { eprintln!("Could not open counter: {error}"); }
                 });
             }
             "pet-quit" => { if let Err(error) = super::quit_pets(app.clone()) { eprintln!("Could not save and quit: {error}"); } }

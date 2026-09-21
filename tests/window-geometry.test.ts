@@ -75,8 +75,9 @@ test('system error text is short and measured above the pet', () => {
   assert.equal(userFacingPetError('stale-revision: refresh app state'), '状态已更新，请再试一次');
   assert.equal(userFacingPetError('double sleep is not unlocked'), '双人床尚未解锁');
   assert.equal(userFacingPetError('unexpected backend detail'), '操作未完成，请稍后再试');
-  const layout = calculatePetLayout({ petWidth: 100, petHeight: 110, bubbleWidth: 180, bubbleHeight: 40, statusWidth: 150, statusHeight: 24, gap: 8, padding: 16 });
+  const layout = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 180, bubbleHeight: 40, bubbleOffset: 0, statusWidth: 150, statusHeight: 24, gap: 8, padding: 16 });
   assert.equal(layout.statusTop < layout.bubbleTop && layout.bubbleTop < layout.petTop, true);
+  assert.equal(layout.widgetTop < layout.statusTop, true);
   assert.equal(layout.windowHeight, layout.petTop + 110 + 16);
 });
 

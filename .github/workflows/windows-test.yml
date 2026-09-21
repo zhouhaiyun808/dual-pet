@@ -47,7 +47,7 @@ jobs:
           if ($installers.Count -eq 0) { throw 'Windows installer not found' }
           $installers | Copy-Item -Destination windows-test-package
           Copy-Item docs/V03_WINDOWS_DOWNLOAD.md windows-test-package/README.md
-          Copy-Item docs/V03_MANUAL_TESTS.md,docs/V03_COUNTER_MANUAL_TESTS.md windows-test-package
+          Copy-Item docs/V03_MANUAL_TESTS.md,docs/V03_DESKTOP_WIDGET_MANUAL_TESTS.md windows-test-package
           Get-ChildItem windows-test-package/*.exe | ForEach-Object {
             $hash = Get-FileHash $_.FullName -Algorithm SHA256
             "$($hash.Hash)  $($_.Name)"

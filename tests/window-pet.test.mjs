@@ -43,6 +43,7 @@ const native = {
   listen: async () => () => {},
   async invoke(command, args) {
     if (command === 'get_app_state') return structuredClone(state);
+    if (command === 'get_input_counts') return {sequence:1,stateRevision:state.revision,inputStatus:'listening',total:{...state.inputTotals},pets:{'pet-a':{day:state.inputTotals.day,todayKeys:0,todayClicks:0},'pet-b':{day:state.inputTotals.day,todayKeys:0,todayClicks:0}}};
     if (command === 'get_double_click_interval') return 300;
     if (command === 'dispatch_action') {
       const action=args.action; const id=action.pet ?? active.label;
@@ -83,7 +84,8 @@ const {WindowPet} = await import('../src/window-pet.ts');
 function element() {
   const handlers = new Map();
   return {
-    handlers, style:{setProperty(){}}, classList:{add(){},remove(){}},
+    handlers, dataset:{}, style:{setProperty(){}}, classList:{add(){},remove(){},contains(){return false;}},
+    setAttribute(){},
     addEventListener(name,fn) {handlers.set(name,fn);}, removeEventListener(name){handlers.delete(name);},
     setPointerCapture(){}, hasPointerCapture(){return false;}, releasePointerCapture(){},
     async fire(name, extra={}) {
@@ -96,7 +98,7 @@ async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
   windows.clear(); listeners.clear(); menus=[]; sleeping=new Map(); owner=null;
   display={position:{x:0,y:0},size:{width:3584,height:2240},workArea:{position:{x:0,y:50},size:{width:3584,height:2190}},scaleFactor:2};
   const progress={day:'2026-09-14',personalGrowth:0,dailyEarned:0,dailyFocusEarned:0,keyPresses:0,mouseClicks:0,todayKeys:0,todayClicks:0,companionSeconds:0,slept:false,faceCompleted:false,workedTogether:false,kissed:false};
-  state={revision:1,pets:{'pet-a':{present:true,activity:'standing',progress:{...progress}},'pet-b':{present:true,activity:'standing',progress:{...progress}}},pair:null,stage:3,settings:{bubblesEnabled:true},pomodoro:{phase:'idle'},dialogue:null,sleepSlot:null,inputStatus:'listening',storageWarning:null,unlockedDialogues:[]};
+  state={revision:1,pets:{'pet-a':{present:true,activity:'standing',progress:{...progress}},'pet-b':{present:true,activity:'standing',progress:{...progress}}},inputTotals:{day:'2026-09-14',todayKeys:0,todayClicks:0},pair:null,stage:3,settings:{bubblesEnabled:true,focusMinutes:25},pomodoro:{phase:'idle',resumePhase:'focus',remainingSeconds:0,completedRounds:0},dialogue:null,sleepSlot:null,inputStatus:'listening',storageWarning:null,unlockedDialogues:[]};
   function make(label,scale) {
     return {label,dpi:scale,position:{x:200*scale,y:100*scale},size:{width:112*scale,height:144*scale},visible:true,
       async outerPosition(){return this.position;}, async outerSize(){return this.size;}, async scaleFactor(){return this.dpi;},
@@ -107,15 +109,19 @@ async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
     };
   }
   active=make('pet-a',dpi); windows.set('pet-a',active); windows.set('pet-b',make('pet-b',guestDpi)); cursor={x:200,y:200};
-  const petElement=element(), bubble={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, status={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, doc=element();
+  const petElement=element(), widget={...element(),hidden:true,getBoundingClientRect:()=>({width:184,height:70})}, widgetClose=element();
+  const widgetPhase=element(), widgetTime=element(), widgetKeys=element(), widgetClicks=element();
+  const bubble={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, status={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, doc=element();
   const context=new Proxy({}, {get:()=>()=>{},set:()=>true});
   const canvas={width:0,height:0,getContext:()=>context};
-  doc.querySelector=selector=>selector==='#pet-image'?canvas:selector==='#dialogue-bubble'?bubble:selector==='#pet-status'?status:petElement;
+  const elements={'#pet-image':canvas,'#dialogue-bubble':bubble,'#pet-status':status,'#desktop-widget':widget,'#desktop-widget-close':widgetClose,'#desktop-widget-phase':widgetPhase,'#desktop-widget-time':widgetTime,'#desktop-widget-keys':widgetKeys,'#desktop-widget-clicks':widgetClicks,'#pet':petElement};
+  doc.querySelector=selector=>elements[selector]??petElement;
   globalThis.document=doc;
   clearedSelections=0;
   globalThis.window={devicePixelRatio:dpi,setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout,getSelection:()=>({removeAllRanges(){clearedSelections++;}})};
   Object.defineProperty(globalThis,'navigator',{value:{userAgent:platform},configurable:true});
-  globalThis.localStorage={setItem(){}};
+  const stored=new Map();
+  globalThis.localStorage={getItem:key=>stored.get(key)??null,setItem(key,value){stored.set(key,value);}};
   const profile={config:{id:'pet-a',partnerId:'pet-b',baseSize:80,frameMs:100},scale:1,minScale:.55,maxScale:4};
   const pet=new WindowPet(profile); await pet.init();
   return {pet, petElement,canvas,doc,profile,win:active};
@@ -140,7 +146,7 @@ test('Mac recovery uses primary logical coordinates even when window was on a 1x
   pet.paired=true;pet.sleeping=true;profile.scale=2;
   await listeners.get('pet-a:pet-recover')({payload:null}); await settle();
   assert(win.lastPosition instanceof LogicalPosition);
-  assert.equal(win.lastPosition.x,1632); assert.equal(pet.paired,true); assert.equal(pet.sleeping,true);assert.equal(profile.scale,2); pet.destroy();
+  assert.equal(win.lastPosition.x,1580); assert.equal(pet.paired,true); assert.equal(pet.sleeping,true);assert.equal(profile.scale,2); pet.destroy();
 });
 test('single and paired activity cycles keep one stable drawing envelope', async () => {
   const {pet,canvas}=await setup();

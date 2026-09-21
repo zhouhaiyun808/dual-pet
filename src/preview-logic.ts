@@ -1,6 +1,6 @@
 import type { AppSnapshot } from './app-state';
 
-export function isCounterPreview(hasTauri: boolean, search: string): boolean {
+export function isBrowserPreview(hasTauri: boolean, search: string): boolean {
   return !hasTauri && new URLSearchParams(search).get('preview') === '1';
 }
 

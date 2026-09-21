@@ -8,6 +8,9 @@ import { type AppSnapshot, type AppAction, petNames, type PetId } from './app-st
 import { paintWorkScene, sceneForPet, workFrameAt } from './work-scene';
 import { acceptPetMenuAction, calculatePetLayout, userFacingPetError, type PetMenuActionPayload } from './pet-ui-logic';
 import { controlSemanticsChanged, gestureFinishAction, isRoleDialogue, nextSinglePetActivity, normalizeDoubleClickDelay, shouldIgnoreSingleClick, shouldRunDelayedSingleClick, shouldSplitOnDoubleClick } from './click-logic';
+import { acceptCounts, type InputCounts } from './live-counts';
+import { desktopWidgetContext, desktopWidgetView, desktopWidgetVisible, setDesktopWidgetVisible } from './desktop-widget';
+import { renderPixelTime } from './pixel-time';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 type Drag = {
   id: number;
@@ -64,6 +67,15 @@ export class WindowPet {
   private readonly macOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   private snapshot: AppSnapshot | null = null;
   private snapshotWork: Promise<void> = Promise.resolve();
+  private liveCounts: InputCounts | null = null;
+  private widget = document.querySelector<HTMLElement>('#desktop-widget')!;
+  private widgetClose = document.querySelector<HTMLButtonElement>('#desktop-widget-close')!;
+  private widgetPhase = document.querySelector<HTMLElement>('#desktop-widget-phase')!;
+  private widgetTime = document.querySelector<HTMLElement>('#desktop-widget-time')!;
+  private widgetKeys = document.querySelector<HTMLElement>('#desktop-widget-keys')!;
+  private widgetClicks = document.querySelector<HTMLElement>('#desktop-widget-clicks')!;
+  private widgetHeight = 0;
+  private widgetWidth = 0;
   private bubble = document.querySelector<HTMLDivElement>('#dialogue-bubble')!;
   private status = document.querySelector<HTMLDivElement>('#pet-status')!;
   private bubbleHeight = 0;
@@ -78,6 +90,7 @@ export class WindowPet {
   private pendingSingleClick: number | null = null;
   private gestureGeneration = 0;
   private doubleClickDelayMs = normalizeDoubleClickDelay(null);
+  private dialogueSpeaker: PetId | 'system' | null = null;
   private get dialogueLocked() {
     return this.snapshot?.pair?.owner === this.profile.config.id
       && this.snapshot.pair.mode === 'face-dialogue' && !!this.snapshot.dialogue;
@@ -89,7 +102,7 @@ export class WindowPet {
     this.bedColor = profile.config.id === 'pet-a' ? 'green' : 'blue';
     const contextMenu = (event: MouseEvent) => {
       event.preventDefault();
-      void invoke('show_pet_menu', { paired: this.paired, sleeping: this.sleeping, ready: this.ready && !this.busy, scale: this.profile.scale }).catch(console.error);
+      void invoke('show_pet_menu', { paired: this.paired, sleeping: this.sleeping, ready: this.ready && !this.busy, scale: this.profile.scale, widgetVisible: this.currentWidgetVisible() }).catch(console.error);
     };
     document.addEventListener('contextmenu', contextMenu);
     this.cleanups.push(() => document.removeEventListener('contextmenu', contextMenu));
@@ -101,9 +114,28 @@ export class WindowPet {
     document.addEventListener('dragstart', blockSelection);
     this.cleanups.push(() => document.removeEventListener('selectstart', blockSelection));
     this.cleanups.push(() => document.removeEventListener('dragstart', blockSelection));
+    const stopWidgetGesture = (event: Event) => event.stopPropagation();
+    const closeWidget = (event: Event) => {
+      event.preventDefault(); event.stopPropagation();
+      setDesktopWidgetVisible(localStorage, desktopWidgetContext(this.paired, this.profile.config.id as PetId), false);
+      this.renderWidget();
+      if (this.ready) void this.layout().catch(console.error);
+    };
+    for (const name of ['pointerdown', 'pointerup', 'dblclick']) this.widgetClose.addEventListener(name, stopWidgetGesture);
+    this.widgetClose.addEventListener('click', closeWidget);
+    this.cleanups.push(() => {
+      for (const name of ['pointerdown', 'pointerup', 'dblclick']) this.widgetClose.removeEventListener(name, stopWidgetGesture);
+      this.widgetClose.removeEventListener('click', closeWidget);
+    });
   }
   async init() {
     this.tauriCleanups.push(await listen<AppSnapshot>('app-state', event => this.enqueueSnapshot(event.payload)));
+    this.tauriCleanups.push(await listen<InputCounts>('input-counts', event => {
+      const next = acceptCounts(this.liveCounts, event.payload);
+      if (next === this.liveCounts) return;
+      this.liveCounts = next;
+      this.renderWidget();
+    }));
     this.tauriCleanups.push(await listen<PetMenuActionPayload>('pet-menu-action', event => {
       const action = acceptPetMenuAction(event.payload, this.profile.config.id as PetId);
       if (action) void this.menuAction(action.action, action.pet).catch(error => this.showError(error));
@@ -132,6 +164,8 @@ export class WindowPet {
     this.installEvents(); this.ready = true;
     const snapshot = await invoke<AppSnapshot>('get_app_state');
     this.enqueueSnapshot(snapshot); await this.snapshotWork;
+    try { this.liveCounts = acceptCounts(this.liveCounts, await invoke<InputCounts>('get_input_counts')); this.renderWidget(); }
+    catch (error) { console.error(error); }
     await this.placeAtHome(); this.paint(0);
     // Keep startup deterministic on macOS: the native window is only exposed
     // after its final logical size and physical position have been applied.
@@ -158,12 +192,62 @@ export class WindowPet {
     if (!this.status.hidden && this.status.textContent === message) return;
     this.status.textContent = message;
     this.status.hidden = false;
+    const statusRect = this.status.getBoundingClientRect();
+    this.statusHeight = Math.ceil(statusRect.height);
+    this.statusWidth = Math.ceil(statusRect.width);
+    this.bubble.hidden = true; this.bubbleHeight = 0; this.bubbleWidth = 0; this.dialogueSpeaker = null;
     if (this.errorTimer !== null) window.clearTimeout(this.errorTimer);
     this.errorTimer = window.setTimeout(() => {
       this.status.hidden = true; this.statusHeight = 0; this.statusWidth = 0;
-      void this.layout().catch(console.error);
+      const snapshot = this.snapshot;
+      const id = this.profile.config.id as PetId;
+      const displayed = !!snapshot?.pets[id].present && (!snapshot.pair || snapshot.pair.owner === id);
+      void (async () => {
+        if (snapshot) await this.renderDialogue(snapshot, displayed);
+        await this.layout();
+      })().catch(console.error);
     }, 7000);
     if (this.ready) void this.layout().catch(console.error);
+  }
+  private currentWidgetVisible() {
+    return desktopWidgetVisible(localStorage, desktopWidgetContext(this.paired, this.profile.config.id as PetId));
+  }
+  private renderWidget() {
+    if (!this.snapshot || !this.currentWidgetVisible()) {
+      this.widget.hidden = true; this.widgetHeight = 0; this.widgetWidth = 0; return;
+    }
+    const view = desktopWidgetView(this.snapshot, this.liveCounts);
+    this.widgetPhase.textContent = view.phase;
+    renderPixelTime(this.widgetTime, view.time);
+    this.widgetKeys.textContent = view.keys;
+    this.widgetClicks.textContent = view.clicks;
+    this.widget.hidden = false;
+    const rect = this.widget.getBoundingClientRect();
+    this.widgetHeight = Math.ceil(rect.height || 70);
+    this.widgetWidth = Math.ceil(rect.width || 184);
+  }
+  private async renderDialogue(next: AppSnapshot, displayed: boolean) {
+    const id = this.profile.config.id as PetId;
+    const pair = next.pair;
+    const line = next.dialogue?.lines[next.dialogue.index];
+    const showLine = this.status.hidden && displayed && next.settings.bubblesEnabled && line &&
+      (pair ? pair.owner === id : line.speaker === id || line.speaker === 'system');
+    if (!showLine) {
+      this.bubble.hidden = true; this.bubbleHeight = 0; this.bubbleWidth = 0; this.dialogueSpeaker = null;
+      return;
+    }
+    const text = `${line.speaker === 'system' ? '休息提醒' : petNames[line.speaker]}：${line.text}`;
+    this.dialogueSpeaker = line.speaker;
+    const bubbleClass = line.speaker === 'system' ? 'reminder' : line.speaker === 'pet-a' ? 'chen' : 'jiang';
+    if (this.bubble.textContent !== text || this.bubble.hidden || !this.bubble.classList.contains(bubbleClass)) {
+      this.bubble.className = `dialogue-bubble ${bubbleClass}`;
+      this.bubble.textContent = text; this.bubble.hidden = false;
+      const monitor = await currentMonitor();
+      const maxWidth = monitor ? monitor.workArea.size.width / monitor.scaleFactor - 20 : 240;
+      this.bubble.style.width = `${Math.max(80, Math.min(240, maxWidth))}px`;
+      this.bubbleHeight = Math.ceil(this.bubble.getBoundingClientRect().height);
+      this.bubbleWidth = Math.ceil(this.bubble.getBoundingClientRect().width);
+    }
   }
   private enqueueSnapshot(next: AppSnapshot) {
     if (!this.ready) return;
@@ -201,23 +285,8 @@ export class WindowPet {
         if (this.pet.hasPointerCapture(drag.id)) this.pet.releasePointerCapture(drag.id);
         this.pet.classList.remove('dragging'); await this.moving;
       }
-      const line = next.dialogue?.lines[next.dialogue.index];
-      const systemHost = next.pets['pet-a'].present ? 'pet-a' : 'pet-b';
-      const showLine = displayed && next.settings.bubblesEnabled && line &&
-        (pair ? pair.owner === id : line.speaker === id || (line.speaker === 'system' && systemHost === id));
-      if (showLine) {
-        const text = `${line.speaker === 'system' ? '休息提醒' : petNames[line.speaker]}：${line.text}`;
-        if (this.bubble.textContent !== text || this.bubble.hidden) {
-          this.bubble.textContent = text; this.bubble.hidden = false;
-          const monitor = await currentMonitor();
-          const maxWidth = monitor ? monitor.workArea.size.width / monitor.scaleFactor - 20 : 240;
-          this.bubble.style.width = `${Math.max(80, Math.min(240, maxWidth))}px`;
-          this.bubbleHeight = Math.ceil(this.bubble.getBoundingClientRect().height);
-          this.bubbleWidth = Math.ceil(this.bubble.getBoundingClientRect().width);
-        }
-      } else {
-        this.bubble.hidden = true; this.bubbleHeight = 0; this.bubbleWidth = 0;
-      }
+      this.renderWidget();
+      await this.renderDialogue(next, displayed);
       if (this.status.hidden) { this.statusHeight = 0; this.statusWidth = 0; }
       else {
         this.statusHeight = Math.ceil(this.status.getBoundingClientRect().height);
@@ -323,10 +392,18 @@ export class WindowPet {
     this.layoutWork = this.layoutWork.catch(console.error).then(async () => {
       const { width, height } = this.geometry();
       this.pet.style.setProperty('--pet-width', `${width}px`); this.pet.style.setProperty('--pet-size', `${height}px`);
-      const measured = calculatePetLayout({ petWidth: width, petHeight: height, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
-      const { windowWidth, windowHeight, statusTop, bubbleTop, petTop: top } = measured;
+      const bubbleOffset = this.paired && this.dialogueSpeaker !== null && this.dialogueSpeaker !== 'system' ? 42 : 0;
+      const measured = calculatePetLayout({ petWidth: width, petHeight: height, widgetWidth: this.widgetWidth, widgetHeight: this.widgetHeight, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, bubbleOffset, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
+      const { windowWidth, windowHeight, widgetTop, statusTop, bubbleTop, petTop: top } = measured;
+      this.widget.style.top = `${widgetTop}px`;
       this.status.style.top = `${statusTop}px`;
       this.bubble.style.top = `${bubbleTop}px`;
+      let bubbleCenter = windowWidth / 2;
+      if (bubbleOffset && this.dialogueSpeaker && this.dialogueSpeaker !== 'system') {
+        const leftId = this.working ? 'pet-b' : this.ownLeft ? this.profile.config.id : this.profile.config.partnerId;
+        bubbleCenter += this.dialogueSpeaker === leftId ? -bubbleOffset : bubbleOffset;
+      }
+      this.bubble.style.left = `${Math.round(bubbleCenter)}px`;
       this.pet.style.left = `${Math.round((windowWidth - width) / 2)}px`;
       this.pet.style.top = `${top}px`;
       const sizeKey = `${windowWidth}:${windowHeight}`;
@@ -548,7 +625,10 @@ export class WindowPet {
     this.invalidateGesture();
     if (action === 'quit') { await invoke('quit_pets'); return; }
     if (action === 'settings') { await invoke('open_settings'); return; }
-    if (action === 'counter') { await invoke('open_counter'); return; }
+    if (action === 'widget-show' || action === 'widget-hide') {
+      setDesktopWidgetVisible(localStorage, desktopWidgetContext(this.paired, this.profile.config.id as PetId), action === 'widget-show');
+      this.renderWidget(); await this.layout(); return;
+    }
     if (!this.ready || this.busy || this.recovering || this.pointer) return;
     if (action === 'close' || action === 'close-a' || action === 'close-b') {
       await this.dispatch({ kind: 'close', pet: action === 'close-a' ? 'pet-a' : action === 'close-b' ? 'pet-b' : targetPet }); return;

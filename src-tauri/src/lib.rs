@@ -89,25 +89,11 @@ async fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         .build().map(|_| ()).map_err(|e| e.to_string())
 }
 #[tauri::command]
-async fn open_counter(app: tauri::AppHandle) -> Result<(), String> {
-    static OPEN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = OPEN.lock().map_err(|e| e.to_string())?;
-    // One read-only view of the shared collector; never start another runtime.
-    if let Some(window) = app.get_webview_window("counter") {
-        return window.show().map_err(|e| e.to_string());
-    }
-    tauri::WebviewWindowBuilder::new(&app, "counter", tauri::WebviewUrl::App("counter.html".into()))
-        .title("Dual Pet · 今日操作").inner_size(360.0, 400.0)
-        .min_inner_size(320.0, 360.0).resizable(true)
-        .focused(false).always_on_top(true)
-        .build().map(|_| ()).map_err(|e| e.to_string())
-}
-#[tauri::command]
 fn report_pet_status(window: tauri::WebviewWindow, status: String) {
     eprintln!("[dual-pet:{}] {}", window.label(), status);
 }
 #[tauri::command]
-fn show_pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle, ready: bool, scale: f64) -> Result<(), String> {
+fn show_pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle, ready: bool, scale: f64, widget_visible: bool) -> Result<(), String> {
     use tauri::menu::{Menu, MenuItem, IsMenuItem};
     let snapshot = app.state::<Runtime>().snapshot()?;
     let id = match window.label() { "pet-a" => PetId::A, "pet-b" => PetId::B, _ => return Err("not a pet window".into()) };
@@ -115,7 +101,8 @@ fn show_pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle, ready: boo
     let sleeping = snapshot.pets[&id].activity == Activity::Sleeping;
     let locked = paired && snapshot.dialogue.as_ref().is_some_and(|dialogue| dialogue.kind != "break-reminder");
     let title = if paired { "陈子奚与江晏" } else if id == PetId::A { "陈子奚" } else { "江晏" };
-    let mut specs = vec![("title", title, false), ("settings", "陪伴设置与成长进度", true), ("counter", "今日操作计数面板", true),
+    let mut specs = vec![("title", title, false), ("settings", "陪伴设置与成长进度", true),
+        (if widget_visible { "widget-hide" } else { "widget-show" }, if widget_visible { "隐藏桌面信息挂件" } else { "显示桌面信息挂件" }, true),
         ("grow", "放大", ready && !locked && scale < 4.0), ("shrink", "缩小", ready && !locked && scale > 0.55), ("reset", "恢复默认大小", ready && !locked),
         ("stand", "站立陪伴", ready), ("work", "工作陪伴", ready),
         ("sleep", if sleeping { "醒来" } else { "睡觉" }, ready)];
@@ -136,7 +123,7 @@ fn show_pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle, ready: boo
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_app_state, get_input_counts, get_input_health, get_double_click_interval, dispatch_action, request_input_access, open_settings, open_counter, quit_pets, report_pet_status, show_pet_menu])
+        .invoke_handler(tauri::generate_handler![get_app_state, get_input_counts, get_input_health, get_double_click_interval, dispatch_action, request_input_access, open_settings, quit_pets, report_pet_status, show_pet_menu])
         .setup(|app| {
             let path = app.path().app_data_dir()?.join("state-v3.json");
             let runtime = Runtime::new(path).map_err(std::io::Error::other)?;

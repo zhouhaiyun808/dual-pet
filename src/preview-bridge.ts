@@ -1,9 +1,9 @@
-import { isCounterPreview } from './counter-logic';
+import { isBrowserPreview } from './preview-logic';
 import { createPreviewState, parsePreviewMessage, type PreviewMessage } from './preview-data';
 
 /** Explicit browser preview only; accept controls from the same-origin parent. */
 export function connectPreview(render: (state: ReturnType<typeof createPreviewState>) => void): () => void {
-  if (!isCounterPreview('__TAURI_INTERNALS__' in window, location.search)) return () => {};
+  if (!isBrowserPreview('__TAURI_INTERNALS__' in window, location.search)) return () => {};
   let revision = 0;
   const apply = (message: PreviewMessage) => {
     const state = createPreviewState(message.scenario, message.keys, message.clicks);

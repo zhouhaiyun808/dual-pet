@@ -28,8 +28,11 @@ export function userFacingPetError(error: unknown): string {
 export interface PetLayoutInput {
   petWidth: number;
   petHeight: number;
+  widgetWidth: number;
+  widgetHeight: number;
   bubbleWidth: number;
   bubbleHeight: number;
+  bubbleOffset: number;
   statusWidth: number;
   statusHeight: number;
   gap: number;
@@ -39,20 +42,23 @@ export interface PetLayoutInput {
 export interface PetLayout {
   windowWidth: number;
   windowHeight: number;
+  widgetTop: number;
   statusTop: number;
   bubbleTop: number;
   petTop: number;
 }
 
-/** Stack system status, dialogue, and the bottom-anchored pet in measured space. */
+/** Stack the optional widget, temporary bubble slot, and bottom-anchored pet. */
 export function calculatePetLayout(input: PetLayoutInput): PetLayout {
   const topPadding = Math.max(4, input.padding);
-  const statusTop = topPadding;
+  const widgetTop = topPadding;
+  const statusTop = widgetTop + input.widgetHeight + (input.widgetHeight ? input.gap : 0);
   const bubbleTop = statusTop + input.statusHeight + (input.statusHeight ? input.gap : 0);
   const petTop = Math.max(40, bubbleTop + input.bubbleHeight + (input.bubbleHeight ? input.gap : 0));
   return {
-    windowWidth: Math.max(input.petWidth + input.padding * 2, input.bubbleWidth + input.padding, input.statusWidth + input.padding),
+    windowWidth: Math.max(input.petWidth + input.padding * 2, input.widgetWidth + input.padding, input.bubbleWidth + input.bubbleOffset * 2 + input.padding, input.statusWidth + input.padding),
     windowHeight: petTop + input.petHeight + input.padding,
+    widgetTop,
     statusTop,
     bubbleTop,
     petTop,

@@ -44,6 +44,17 @@ const profile: PetProfile = {
 
 app.innerHTML = `
   <div class="pet-shell">
+    <section id="desktop-widget" class="desktop-widget" aria-label="桌面信息挂件" hidden>
+      <button id="desktop-widget-close" class="desktop-widget-close" type="button" aria-label="关闭桌面信息挂件" title="关闭桌面信息挂件"></button>
+      <div class="desktop-widget-content">
+        <div class="desktop-widget-timer"><span id="desktop-widget-phase"></span><span id="desktop-widget-time" class="desktop-widget-time"></span></div>
+        <div class="desktop-widget-inputs" aria-label="今日输入">
+          <span class="desktop-widget-count"><img src="/assets/ui/keyboard-reference.png" alt="键盘"><strong id="desktop-widget-keys">0</strong></span>
+          <span class="desktop-widget-divider" aria-hidden="true"></span>
+          <span class="desktop-widget-count"><img src="/assets/ui/mouse-reference.png" alt="鼠标"><strong id="desktop-widget-clicks">0</strong></span>
+        </div>
+      </div>
+    </section>
     <div class="pet" id="pet">
       <canvas id="pet-image" aria-label="${profile.config.name}"></canvas>
     </div>
@@ -72,4 +83,3 @@ try {
   await getCurrentWindow().show().catch(console.error);
 }
 window.addEventListener('beforeunload', () => pet.destroy(), { once: true });
-

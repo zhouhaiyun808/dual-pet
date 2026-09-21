@@ -5,8 +5,7 @@
   "windows": [
     "pet-a",
     "pet-b",
-    "settings",
-    "counter"
+    "settings"
   ],
   "permissions": [
     "core:default",

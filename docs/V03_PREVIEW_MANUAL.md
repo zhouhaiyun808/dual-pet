@@ -4,7 +4,7 @@
 
 本机查看地址：`http://127.0.0.1:4173/preview.html`。服务停止时先执行`npm run build`再执行`npm run preview:browser`；这只是本机地址，不是可供其他设备直接访问的公网地址。无需启动桌宠。
 
-演示入口为 `/preview.html`。它只在普通浏览器中运行，页面内嵌 `/counter.html?preview=1` 与 `/settings.html?preview=1`，用 `postMessage` 传递模拟场景、按键累计和点击累计。演示数据不会写入真实存档，也不会申请输入监控权限；这只是一组展示数据，不跑真实计时或收益算法。
+演示入口为 `/preview.html`。它只在普通浏览器中运行，页面内嵌 `/settings.html?preview=1`，用 `postMessage` 传递模拟场景、按键累计和点击累计。演示数据不会写入真实存档，也不会申请输入监控权限；桌面轻量挂件、窗口位置与透明效果仍需在 macOS/Windows 原生包中验收。
 
 协议消息为：
 

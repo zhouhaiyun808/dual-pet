@@ -19,11 +19,11 @@ if (hasTauri) {
 } else {
   root.innerHTML = `
     <header class="page-head">
-      <div><p class="eyebrow">DUAL PET / V0.3 PREVIEW</p><h1>浏览器演示控制页</h1><p class="intro">用一组安全的模拟数据，快速查看真实计数面板和设置页的不同状态。</p></div>
+      <div><p class="eyebrow">DUAL PET / V0.3 PREVIEW</p><h1>浏览器演示控制页</h1><p class="intro">用一组安全的模拟数据，快速查看设置页的不同状态。</p></div>
       <span class="simulation-badge">模拟数据 · 不写入存档</span>
     </header>
     <section class="controls" aria-labelledby="controls-heading">
-      <div class="section-head"><div><h2 id="controls-heading">演示控制</h2><p class="hint">每次改变都会同步到下面两个真实页面。</p></div><span id="current-state" class="state-pill" role="status">正常</span></div>
+      <div class="section-head"><div><h2 id="controls-heading">演示控制</h2><p class="hint">每次改变都会同步到下面的真实设置页面。</p></div><span id="current-state" class="state-pill" role="status">正常</span></div>
       <fieldset class="scenario-set"><legend>场景</legend><div class="scenario-grid">${scenarios.map(({ id, label }) => `<label class="scenario-option"><input type="radio" name="scenario" value="${id}"${id === 'normal' ? ' checked' : ''}><span>${label}</span></label>`).join('')}</div><p id="scenario-description" class="scenario-description"></p></fieldset>
       <div class="sim-row">
         <div><h3>模拟按键</h3><p class="hint">累计整数，范围 0–100000</p></div>
@@ -35,13 +35,12 @@ if (hasTauri) {
       </div>
       <div class="control-footer"><p class="hint">只是一组展示数据，不跑真实计时/收益算法；单场景输入加成示例最多键盘 +1 / 点击 +1，次数仍可继续增加。</p><button id="reset" type="button">重置模拟数据</button></div>
     </section>
-    <section class="previews" aria-labelledby="previews-heading"><div class="section-head"><div><h2 id="previews-heading">真实页面预览</h2><p class="hint">iframe 内复用正式页面渲染；演示控制不直接改它们的样式。</p></div></div><div class="frame-grid"><article class="frame-card"><div class="frame-title"><h3>实时输入</h3><code>/counter.html?preview=1</code></div><iframe id="counter-frame" title="实时输入面板预览" src="/counter.html?preview=1"></iframe></article><article class="frame-card"><div class="frame-title"><h3>设置</h3><code>/settings.html?preview=1</code></div><iframe id="settings-frame" title="设置页面预览" src="/settings.html?preview=1"></iframe></article></div></section>
+    <section class="previews" aria-labelledby="previews-heading"><div class="section-head"><div><h2 id="previews-heading">真实页面预览</h2><p class="hint">iframe 内复用正式设置页面渲染；演示控制不直接改它的样式。</p></div></div><div class="frame-grid"><article class="frame-card"><div class="frame-title"><h3>设置</h3><code>/settings.html?preview=1</code></div><iframe id="settings-frame" title="设置页面预览" src="/settings.html?preview=1"></iframe></article></div></section>
     <section class="scenario-help" aria-labelledby="help-heading"><h2 id="help-heading">六个场景看什么</h2><dl>${scenarios.map(({ label, description }) => `<div><dt>${label}</dt><dd>${description}</dd>`).join('')}</dl><p class="notice">这是开发演示，不是桌面窗口验收。窗口位置、透明度、系统权限和真实输入采集仍需在目标环境中单独确认。</p></section>
   `;
 
-  const counterFrame = document.querySelector<HTMLIFrameElement>('#counter-frame')!;
   const settingsFrame = document.querySelector<HTMLIFrameElement>('#settings-frame')!;
-  const frames = [counterFrame, settingsFrame];
+  const frames = [settingsFrame];
   let scenario: PreviewScenario = 'normal';
   let keys = 0;
   let clicks = 0;
