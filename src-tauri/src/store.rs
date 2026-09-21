@@ -113,7 +113,8 @@ fn read_save(path: &Path) -> Result<CoreSave, ReadError> {
     let version = value.get("version").and_then(serde_json::Value::as_u64)
         .ok_or_else(|| ReadError::Corrupt("缺少版本号".into()))?;
     if version != SAVE_VERSION as u64 { return Err(ReadError::Unsupported(version)); }
-    let envelope: Envelope = serde_json::from_value(value).map_err(|error| ReadError::Corrupt(error.to_string()))?;
+    let mut envelope: Envelope = serde_json::from_value(value).map_err(|error| ReadError::Corrupt(error.to_string()))?;
+    envelope.state.migrate_legacy_bond();
     envelope.state.validate().map_err(ReadError::Corrupt)?;
     Ok(envelope.state)
 }
@@ -306,7 +307,7 @@ mod tests {
         let directory = TestDirectory::new(); let store = directory.store();
         let core = Core::new(clock()); store.save(&core).unwrap(); store.save(&core).unwrap();
         let mut value: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
-        value["state"]["snapshot"]["pets"]["pet-a"]["progress"]["intimacy"] = serde_json::json!(-2.0);
+        value["state"]["snapshot"]["pets"]["pet-a"]["progress"]["personalGrowth"] = serde_json::json!(-2.0);
         fs::write(store.path(), serde_json::to_vec(&value).unwrap()).unwrap();
         let loaded = store.load(clock()).unwrap();
         assert!(loaded.snapshot().storage_warning.is_some());
@@ -324,5 +325,27 @@ mod tests {
         assert!(loaded.pets.values().all(|p| p.present));
         assert_eq!(loaded.pomodoro.phase, crate::state::PomodoroPhase::Paused);
         assert_eq!(loaded.settings, core.snapshot().settings);
+    }
+
+    #[test]
+    fn legacy_intimacy_migrates_to_personal_growth_and_minimum_shared_bond() {
+        let directory = TestDirectory::new(); let store = directory.store();
+        let core = Core::new(clock()); store.save(&core).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        value["state"]["snapshot"].as_object_mut().unwrap().remove("bond");
+        for (id, growth) in [("pet-a", 2400.0), ("pet-b", 1700.0)] {
+            let progress = value["state"]["snapshot"]["pets"][id]["progress"].as_object_mut().unwrap();
+            progress.remove("personalGrowth");
+            progress.insert("intimacy".into(), serde_json::json!(growth));
+        }
+        fs::write(store.path(), serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        let loaded = store.load(clock()).unwrap();
+        assert_eq!(loaded.snapshot().pets[&PetId::A].progress.intimacy, 2400.0);
+        assert_eq!(loaded.snapshot().pets[&PetId::B].progress.intimacy, 1700.0);
+        assert_eq!(loaded.snapshot().bond.value, 1700.0);
+        store.save(&loaded).unwrap();
+        let migrated: serde_json::Value = serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        assert_eq!(migrated["state"]["snapshot"]["bond"]["value"], 1700.0);
+        assert!(migrated["state"]["snapshot"]["pets"]["pet-a"]["progress"].get("intimacy").is_none());
     }
 }

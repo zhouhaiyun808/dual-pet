@@ -60,6 +60,7 @@ pub struct DailySources {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Progress {
+    #[serde(rename = "personalGrowth", alias = "intimacy")]
     pub intimacy: f64,
     pub day: String,
     pub daily_earned: f64,
@@ -76,6 +77,14 @@ pub struct Progress {
     pub face_completed: bool,
     pub worked_together: bool,
     pub kissed: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Bond {
+    pub value: f64,
+    pub day: String,
+    pub daily_earned: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -168,6 +177,8 @@ pub struct Dialogue {
 pub struct AppSnapshot {
     pub revision: u64,
     pub pets: BTreeMap<PetId, PetRecord>,
+    #[serde(default)]
+    pub bond: Bond,
     pub pair: Option<PairRecord>,
     pub stage: u8,
     pub settings: Settings,
@@ -261,7 +272,9 @@ impl Core {
             progress: Progress { day: clock.local_date.clone(), ..Progress::default() },
         })).collect();
         let mut core = Self {
-            state: AppSnapshot { revision: 0, pets, pair: None, stage: 1,
+            state: AppSnapshot { revision: 0, pets,
+                bond: Bond { day: clock.local_date.clone(), ..Bond::default() },
+                pair: None, stage: 1,
                 settings, pomodoro: Pomodoro::default(), dialogue: None,
                 sleep_slot: None, input_status: "unavailable".into(),
                 storage_warning: None, unlocked_dialogues: Vec::new() },
@@ -300,7 +313,8 @@ impl Core {
             dialogue_cooldown: self.dialogue_cooldown, next_dialogue_id: self.next_dialogue_id }
     }
 
-    pub fn from_save(saved: CoreSave, clock: Clock) -> Result<Self, String> {
+    pub fn from_save(mut saved: CoreSave, clock: Clock) -> Result<Self, String> {
+        saved.migrate_legacy_bond();
         saved.validate()?;
         let mut core = Self::new(clock.clone());
         core.state = saved.snapshot;
@@ -554,6 +568,10 @@ impl Core {
     }
 
     fn roll_day(&mut self, day: &str) {
+        if self.state.bond.day.as_str() < day {
+            self.state.bond.day = day.into();
+            self.state.bond.daily_earned = 0.0;
+        }
         for id in PetId::ALL {
             let p = &mut self.pet_mut(id).progress;
             // ISO dates compare chronologically. Clock reversal cannot reset caps.
@@ -575,6 +593,14 @@ impl Core {
         amount
     }
 
+    fn credit_bond(&mut self, requested: f64) -> f64 {
+        let amount = requested.max(0.0)
+            .min((DAILY_LIMIT - self.state.bond.daily_earned).max(0.0));
+        self.state.bond.value += amount;
+        self.state.bond.daily_earned = (self.state.bond.daily_earned + amount).min(DAILY_LIMIT);
+        amount
+    }
+
     fn award_time(&mut self, elapsed: f64) {
         for id in PetId::ALL {
             if !self.pet(id).present { continue; }
@@ -582,6 +608,11 @@ impl Core {
             self.pet_mut(id).progress.companion_seconds += elapsed;
             let credited = self.credit(id, elapsed * rate / 60.0, false);
             self.pet_mut(id).progress.daily_sources.companion += credited;
+        }
+        if self.state.pair.is_some()
+            && PetId::ALL.into_iter().all(|id| self.pet(id).present) {
+            let sleeping = self.state.pair.as_ref().is_some_and(|pair| pair.mode == PairMode::DoubleSleep);
+            self.credit_bond(elapsed * if sleeping { 0.25 } else { 1.0 } / 60.0);
         }
     }
 
@@ -616,13 +647,13 @@ impl Core {
     }
 
     fn check_unlocks(&mut self) {
-        if self.state.stage < 2 && PetId::ALL.into_iter().all(|id| {
+        if self.state.stage < 2 && self.state.bond.value >= KISS_THRESHOLD && PetId::ALL.into_iter().all(|id| {
             let p = &self.pet(id).progress;
-            p.intimacy >= KISS_THRESHOLD && p.slept && p.face_completed
+            p.slept && p.face_completed
         }) { self.state.stage = 2; }
-        if self.state.stage == 2 && PetId::ALL.into_iter().all(|id| {
+        if self.state.stage == 2 && self.state.bond.value >= BED_THRESHOLD && PetId::ALL.into_iter().all(|id| {
             let p = &self.pet(id).progress;
-            p.intimacy >= BED_THRESHOLD && p.worked_together && p.kissed
+            p.worked_together && p.kissed
         }) { self.state.stage = 3; }
     }
 
@@ -896,12 +927,32 @@ impl Core {
 }
 
 impl CoreSave {
+    pub(crate) fn migrate_legacy_bond(&mut self) {
+        if !self.snapshot.bond.day.is_empty() { return; }
+        let minimum_growth = PetId::ALL.into_iter()
+            .map(|id| self.snapshot.pets.get(&id).map_or(0.0, |pet| pet.progress.intimacy))
+            .fold(f64::INFINITY, f64::min);
+        let day = PetId::ALL.into_iter().find_map(|id| self.snapshot.pets.get(&id).map(|pet| pet.progress.day.clone()))
+            .unwrap_or_default();
+        self.snapshot.bond = Bond {
+            value: if minimum_growth.is_finite() { minimum_growth } else { 0.0 },
+            day,
+            daily_earned: 0.0,
+        };
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.snapshot.settings.validate()?;
         if self.snapshot.pets.len() != 2 || PetId::ALL.iter().any(|id| !self.snapshot.pets.contains_key(id)) {
             return Err("save must contain exactly pet-a and pet-b".into());
         }
         if !(1..=3).contains(&self.snapshot.stage) { return Err("invalid stage".into()); }
+        let bond = &self.snapshot.bond;
+        if parse_date(&bond.day).is_none()
+            || [bond.value, bond.daily_earned].into_iter().any(|n| !n.is_finite() || n < 0.0)
+            || bond.daily_earned > DAILY_LIMIT {
+            return Err("invalid bond in save".into());
+        }
         for pet in self.snapshot.pets.values() {
             let p = &pet.progress;
             if parse_date(&p.day).is_none() || [p.intimacy, p.daily_earned, p.daily_focus_earned, p.companion_seconds]
@@ -1113,6 +1164,9 @@ mod tests {
         assert_eq!(value["settings"]["breakMinutes"], 5);
         assert_eq!(value["settings"]["longBreakMinutes"], 15);
         assert!(value["pets"]["pet-a"]["progress"]["dailyEarned"].is_number());
+        assert!(value["pets"]["pet-a"]["progress"]["personalGrowth"].is_number());
+        assert!(value["pets"]["pet-a"]["progress"].get("intimacy").is_none());
+        assert_eq!(value["bond"]["value"], 0.0);
         assert_eq!(value["pomodoro"]["resumePhase"], "focus");
         assert!(value["settings"].get("focus_minutes").is_none());
     }
@@ -1339,6 +1393,7 @@ mod tests {
     fn dialogue_finishes_both_milestones_unlocks_and_then_kisses() {
         let mut c = Core::new(clock());
         for id in PetId::ALL { c.pet_mut(id).progress.intimacy = 1000.0; c.pet_mut(id).progress.slept = true; activity(&mut c, id, Activity::Standing); }
+        c.state.bond.value = 1000.0;
         command(&mut c, action("join", Some(PetId::A)));
         assert!(c.dialogue_locks_drag());
         assert!(c.dispatch(action("split", None), None, clock()).is_err());
@@ -1352,15 +1407,35 @@ mod tests {
     }
 
     #[test]
-    fn both_independent_thresholds_and_milestones_are_required() {
+    fn shared_bond_thresholds_and_pair_milestones_are_required() {
         let mut c = Core::new(clock());
         for id in PetId::ALL { let p = &mut c.pet_mut(id).progress; p.slept = true; p.face_completed = true; p.intimacy = 1000.0; }
-        c.pet_mut(PetId::B).progress.intimacy = 999.0; c.check_unlocks(); assert_eq!(c.state.stage, 1);
-        c.pet_mut(PetId::B).progress.intimacy = 1000.0; c.check_unlocks(); assert_eq!(c.state.stage, 2);
+        c.state.bond.value = 999.0; c.check_unlocks(); assert_eq!(c.state.stage, 1);
+        c.state.bond.value = 1000.0; c.check_unlocks(); assert_eq!(c.state.stage, 2);
         for id in PetId::ALL { let p = &mut c.pet_mut(id).progress; p.intimacy = 4000.0; p.worked_together = true; p.kissed = true; }
+        c.state.bond.value = 4000.0;
         c.pet_mut(PetId::B).progress.kissed = false; c.check_unlocks(); assert_eq!(c.state.stage, 2);
         c.pet_mut(PetId::B).progress.kissed = true; c.check_unlocks(); assert_eq!(c.state.stage, 3);
         command(&mut c, action("close", Some(PetId::B))); assert_eq!(c.state.stage, 3);
+    }
+
+    #[test]
+    fn bond_only_grows_once_during_joint_activity_and_has_its_own_cap() {
+        let mut c = Core::new(clock());
+        c.award_time(60.0);
+        near(c.state.bond.value, 0.0);
+        command(&mut c, action("join", Some(PetId::A)));
+        c.cancel_dialogue();
+        c.award_time(60.0);
+        near(c.state.bond.value, 1.0);
+        near(c.pet(PetId::A).progress.intimacy, 2.0);
+        near(c.pet(PetId::B).progress.intimacy, 2.0);
+        c.state.bond.daily_earned = 799.75;
+        c.award_time(60.0);
+        near(c.state.bond.value, 1.25);
+        near(c.state.bond.daily_earned, 800.0);
+        c.award_input(60, 12, 10);
+        near(c.state.bond.value, 1.25);
     }
 
     #[test]

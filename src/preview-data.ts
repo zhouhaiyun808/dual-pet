@@ -25,7 +25,7 @@ export function createPreviewState(scenario: PreviewScenario, keys = 0, clicks =
     const legacy = scenario === 'legacy';
     const capped = scenario === 'capped';
     const result: Progress = {
-      intimacy: (capped ? 2500 : 420) + keyboard + mouse,
+      personalGrowth: (capped ? 2500 : 420) + keyboard + mouse,
       day: '2026-09-14', dailyEarned: (capped ? 800 : legacy ? 40 : 25) + keyboard + mouse,
       dailyFocusEarned: capped ? 80 : 8,
       dailySources: capped ? { companion: 600, keyboard: 60, mouse: 60 }
@@ -41,6 +41,7 @@ export function createPreviewState(scenario: PreviewScenario, keys = 0, clicks =
     revision: 1,
     pets: { 'pet-a': { present: true, activity: 'working', progress: progress('pet-a') },
       'pet-b': { present: scenario !== 'away', activity: 'standing', progress: progress('pet-b') } },
+    bond: { value: scenario === 'capped' ? 2500 : 420, day: '2026-09-14', dailyEarned: scenario === 'capped' ? 800 : 12 },
     pair: null, stage: 1,
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 15, autoNext: false,
       longBreakEnabled: true, lunchEnabled: true, nightEnabled: true, inputEnabled: true, bubblesEnabled: true },

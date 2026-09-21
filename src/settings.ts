@@ -9,6 +9,7 @@ import { isCounterPreview } from './counter-logic';
 import { connectPreview } from './preview-bridge';
 import { renderPixelTime } from './pixel-time';
 import { loadSprite } from './assets';
+import { savedEditIsCurrent, validateIntegerSetting } from './settings-save-logic';
 import './settings.css';
 
 const root = document.querySelector<HTMLElement>('#settings-app')!;
@@ -31,8 +32,8 @@ root.innerHTML = `
     </div>
   </header>
   <nav class="settings-tabs" role="tablist" aria-label="同行页面">
-    <button class="settings-tab" id="tab-companion" role="tab" aria-selected="false" aria-controls="panel-companion" tabindex="-1" data-tab="companion">陪伴</button>
-    <button class="settings-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="panel-focus" tabindex="0" data-tab="focus">专注</button>
+    <button class="settings-tab" id="tab-companion" role="tab" aria-selected="false" aria-controls="panel-companion" tabindex="-1" data-tab="companion">片语</button>
+    <button class="settings-tab" id="tab-focus" role="tab" aria-selected="true" aria-controls="panel-focus" tabindex="0" data-tab="focus">今日</button>
     <button class="settings-tab" id="tab-growth" role="tab" aria-selected="false" aria-controls="panel-growth" tabindex="-1" data-tab="growth">成长</button>
     <button class="settings-tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings">设置</button>
   </nav>
@@ -58,6 +59,8 @@ root.innerHTML = `
       <div class="companion-grid" id="companions"></div>
     </section>
     <section class="card input-card" aria-labelledby="input-heading">
+      <span class="companion-decoration chen" aria-hidden="true"><img class="pine" src="/assets/ui/chen-pine.png" alt=""><img class="jade" src="/assets/ui/chen-jade.png" alt=""></span>
+      <span class="companion-decoration jiang" aria-hidden="true"><img class="bamboo" src="/assets/ui/jiang-bamboo.png" alt=""><img class="swallow" src="/assets/ui/jiang-gold-swallow-v2.png" alt=""></span>
       <div class="section-head"><h2 id="input-heading" class="ornament-heading">今日输入</h2></div>
       <div class="input-grid" id="input-summary"></div>
       <p id="input-status" class="input-status">等待输入统计状态…</p>
@@ -66,12 +69,14 @@ root.innerHTML = `
   <section class="tab-panel" id="panel-growth" role="tabpanel" aria-labelledby="tab-growth" data-panel="growth" hidden>
     <section class="card" aria-labelledby="growth-heading">
       <div class="section-head"><h2 id="growth-heading" class="ornament-heading">两人的同行录</h2><span id="growth-stage" class="badge">阶段 —</span></div>
-      <p id="growth-unlock-summary" class="hint" style="margin-bottom:14px">两人各自成长，双方达标后共同解锁。</p>
+      <p id="growth-unlock-summary" class="hint" style="margin-bottom:14px">共享羁绊推动共同阶段，个人成长记录各自的陪伴。</p>
+      <article class="bond-detail"><div><span class="hint">两人羁绊</span><strong id="bond-score" class="score">—</strong></div><progress id="bond-progress" max="1000" value="0" aria-label="两人羁绊进度"></progress><p id="bond-daily" class="hint">今日羁绊 — / 800</p></article>
       <div class="pet-grid" id="pets"></div>
-      <p class="notice">亲密度、里程碑与每日收益都按角色分别记录；离场期间不会补算收益。</p>
+      <p class="notice">个人成长、里程碑与每日收益按角色分别记录；离场期间不会补算收益。工作动画、动作和装饰始终可用。</p>
     </section>
   </section>
   <section class="tab-panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" data-panel="settings" hidden>
+    <p id="draft-status" class="auto-save-status hint" role="status">设置读取中…</p>
     <section class="card" aria-labelledby="sleep-heading">
       <div class="section-head"><h2 id="sleep-heading" class="ornament-heading">按时安寝</h2><span id="sleep-status" class="hint">—</span></div>
       <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="lunchEnabled" disabled>午休</label><span>12:30 – 14:00</span></div>
@@ -99,10 +104,9 @@ root.innerHTML = `
       <div class="section-head"><h2 id="connection-heading" class="ornament-heading">状态连接</h2><button id="refresh" type="button">刷新状态</button></div>
       <p id="connection" class="hint">正在读取陪伴状态…</p>
       <div id="storage-warning" class="error" role="status" hidden></div>
-      <p class="hint">设置草稿只在点击保存后写入本地记录；实时状态和计时器不会因为切换页签而重置。</p>
+      <p class="hint">设置会自动写入本地记录；实时状态和计时器不会因为切换页签而重置。</p>
     </section>
   </section>
-  <div class="savebar"><p id="draft-status" class="hint" role="status">设置读取中…</p><div class="actions"><button id="discard" disabled>撤销草稿</button><button id="save" class="primary" disabled>保存设置</button></div></div>
   <footer>本地记录 · 各自成长 · 一起同行</footer>
 `;
 
@@ -129,13 +133,17 @@ let liveCounts: InputCounts | null = null;
 let counterFrame: number | null = null;
 let disposed = false;
 const dirty = new Set<keyof Settings>();
+const editVersions = new Map<keyof Settings, number>();
+let settingsSaving = false;
+let saveTimer: number | undefined;
+let saveMessage = '所有设置已同步';
 let catalogueKey = '';
 
 for (const id of petIds) {
   const card = document.createElement('article');
   card.className = 'pet';
   card.dataset.petId = id;
-  card.innerHTML = `<div class="section-head"><h3>${petNames[id]}</h3><span id="${id}-presence" class="badge">—</span></div><p><span id="${id}-score" class="score">—</span> <small>亲密度</small></p><p id="${id}-target" class="hint"></p><progress id="${id}-progress" max="1000" value="0" aria-label="${petNames[id]}成长进度"></progress><ul id="${id}-milestones" class="milestones"></ul><p id="${id}-stats" class="stats"></p><dl id="${id}-earnings" class="earnings" aria-label="${petNames[id]}每日收益分类"><div><dt>陪伴</dt><dd id="${id}-earning-companion">0.00</dd></div><div><dt>键盘</dt><dd id="${id}-earning-keyboard">0.00</dd></div><div><dt>点击</dt><dd id="${id}-earning-mouse">0.00</dd></div><div><dt>番茄钟</dt><dd id="${id}-earning-focus">0.00</dd></div><div><dt>未分类</dt><dd id="${id}-earning-unclassified">0.00</dd></div></dl><p class="hint earnings-note">陪伴含清醒与宠物睡眠基础收益；未分类是本版本前无法追溯来源的历史收益。</p><button id="${id}-summon" type="button" style="margin-top:12px" disabled>呼唤${petNames[id]}</button>`;
+  card.innerHTML = `<div class="section-head"><h3>${petNames[id]}</h3><span id="${id}-presence" class="badge">—</span></div><p><span id="${id}-score" class="score">—</span> <small>个人成长</small></p><p id="${id}-target" class="hint"></p><progress id="${id}-progress" max="1000" value="0" aria-label="${petNames[id]}个人成长进度"></progress><ul id="${id}-milestones" class="milestones"></ul><p id="${id}-stats" class="stats"></p><dl id="${id}-earnings" class="earnings" aria-label="${petNames[id]}每日收益分类"><div><dt>陪伴</dt><dd id="${id}-earning-companion">0.00</dd></div><div><dt>键盘</dt><dd id="${id}-earning-keyboard">0.00</dd></div><div><dt>点击</dt><dd id="${id}-earning-mouse">0.00</dd></div><div><dt>番茄钟</dt><dd id="${id}-earning-focus">0.00</dd></div><div><dt>未分类</dt><dd id="${id}-earning-unclassified">0.00</dd></div></dl><p class="hint earnings-note">陪伴含清醒与宠物睡眠基础收益；未分类是旧版本无法追溯来源的历史收益。</p><button id="${id}-summon" type="button" style="margin-top:12px" disabled>呼唤${petNames[id]}</button>`;
   element('pets').append(card);
   element(`${id}-summon`).addEventListener('click', () => void dispatch({ kind: 'summon', pet: id }));
 }
@@ -144,19 +152,31 @@ for (const id of petIds) {
   const card = document.createElement('article');
   card.className = 'companion-pet';
   card.dataset.petId = id;
-  card.innerHTML = `<img class="portrait" src="/assets/${id}/walk-down/01.png" alt="${petNames[id]}正面"><div class="companion-copy"><h3>${petNames[id]}</h3><p class="hint"><span id="${id}-companion-presence">—</span> · <span id="${id}-companion-activity">—</span></p><div class="hearts" id="${id}-hearts" role="meter" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-label="${petNames[id]}亲密度">${'<span class="heart" aria-hidden="true"></span>'.repeat(5)}</div><progress id="${id}-companion-progress" max="1000" value="0" aria-label="${petNames[id]}亲密度进度"></progress><p id="${id}-companion-summary" class="sr-only">亲密度 —</p></div>`;
+  const portrait = id === 'pet-a' ? '/assets/pet-a/portrait-front.png' : '/assets/pet-b/walk-down/01.png';
+  card.innerHTML = `<img class="portrait" src="${portrait}" alt="${petNames[id]}正面"><div class="companion-copy"><h3>${petNames[id]}</h3><p class="hint"><span id="${id}-companion-presence">—</span> · <span id="${id}-companion-activity">—</span></p><progress id="${id}-companion-progress" max="1000" value="0" aria-label="${petNames[id]}个人成长进度"></progress><p id="${id}-companion-summary" class="hint">个人成长 —</p></div>`;
   element('companions').append(card);
   const decoration = root.querySelector(`.companion-decoration.${id === 'pet-a' ? 'chen' : 'jiang'}`);
   if (decoration) card.append(decoration);
 }
 
+const bondCompanion = document.createElement('article');
+bondCompanion.className = 'companion-bond';
+bondCompanion.innerHTML = `<h3>两人羁绊</h3><div class="hearts" id="bond-hearts" role="meter" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0" aria-label="两人羁绊">${'<span class="heart" aria-hidden="true"></span>'.repeat(5)}</div><strong id="bond-companion-score">—</strong><p id="bond-companion-summary" class="hint">共同进度</p>`;
+element('companions').insertBefore(bondCompanion, element('companions').children[1]);
+
 for (const id of petIds) {
   const card = document.createElement('article');
   card.className = 'input-pet';
   card.dataset.petId = id;
-  card.innerHTML = `<img class="portrait" src="/assets/${id}/walk-down/01.png" alt="${petNames[id]}正面"><div class="input-copy"><h3>${petNames[id]}</h3><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="${id}-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="${id}-summary-clicks">—</strong></div></div>`;
+  const portrait = id === 'pet-a' ? '/assets/pet-a/portrait-front.png' : '/assets/pet-b/walk-down/01.png';
+  card.innerHTML = `<img class="portrait" src="${portrait}" alt="${petNames[id]}正面"><div class="input-copy"><h3>${petNames[id]}</h3><p class="hint">个人输入</p><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="${id}-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="${id}-summary-clicks">—</strong></div></div>`;
   element('input-summary').append(card);
 }
+
+const inputTotal = document.createElement('article');
+inputTotal.className = 'input-total';
+inputTotal.innerHTML = `<h3>今日总数</h3><p class="hint">两人合计</p><div class="input-row"><span class="pixel-icon keyboard" aria-hidden="true"></span><span>键盘</span><strong id="total-summary-keys">—</strong></div><div class="input-row"><span class="pixel-icon mouse" aria-hidden="true"></span><span>点击</span><strong id="total-summary-clicks">—</strong></div>`;
+element('input-summary').insertBefore(inputTotal, element('input-summary').children[1]);
 
 // Use the same sprite cleanup as the desktop pets. Export padding and sheet
 // borders must not shrink or offset the front-facing portraits in their slots.
@@ -233,6 +253,8 @@ function onCounts(incoming: InputCounts): void {
 }
 function renderCounters(): void {
   if (!snapshot || disposed) return;
+  let totalKeys = 0;
+  let totalClicks = 0;
   for (const id of petIds) {
     const p = snapshot.pets[id].progress;
     const counts = displayedCounts(snapshot, liveCounts, id);
@@ -240,10 +262,14 @@ function renderCounters(): void {
     element(`${id}-stats`).textContent = `操作次数：按键 ${counts.todayKeys.toLocaleString()} · 点击 ${counts.todayClicks.toLocaleString()} · 今日收益：${formatDailyEarnings(earnings.cappedTotal)} / 800`;
     element(`${id}-summary-keys`).textContent = counts.todayKeys.toLocaleString('zh-CN');
     element(`${id}-summary-clicks`).textContent = counts.todayClicks.toLocaleString('zh-CN');
+    totalKeys += counts.todayKeys;
+    totalClicks += counts.todayClicks;
     for (const key of ['companion', 'keyboard', 'mouse', 'focus', 'unclassified'] as const) {
       element(`${id}-earning-${key}`).textContent = formatDailySourceEarnings(earnings[key]);
     }
   }
+  element('total-summary-keys').textContent = totalKeys.toLocaleString('zh-CN');
+  element('total-summary-clicks').textContent = totalClicks.toLocaleString('zh-CN');
   const status = liveCounts && liveCounts.stateRevision >= snapshot.revision ? liveCounts.inputStatus : snapshot.inputStatus;
   element('input-status').textContent = `${snapshot.settings.inputEnabled ? '计数已启用' : '计数已关闭'} · ${inputStatusText(status)}`;
 }
@@ -258,9 +284,7 @@ async function dispatch(action: AppAction): Promise<void> {
   render();
   try {
     const next = await invoke<AppSnapshot>('dispatch_action', { action, expectedRevision: revision });
-    if (action.kind === 'settings') dirty.clear();
     accept(next);
-    if (action.kind === 'settings') element('draft-status').textContent = '设置已保存';
   } catch (error) {
     const stale = isStale(error);
     let message = stale ? '状态刚刚发生变化，操作未重试。已保留设置草稿；请检查最新状态后再次点击。' : `操作未确认完成，请先核对最新状态。${formatError(error)}`;
@@ -269,6 +293,7 @@ async function dispatch(action: AppAction): Promise<void> {
   } finally {
     busy = false;
     render();
+    if (dirty.size) scheduleSettingsSave(0);
   }
 }
 
@@ -318,38 +343,46 @@ function render(): void {
   }
   element('sleep-status').textContent = state.sleepSlot ? '当前在作息睡眠时段' : '当前无作息睡眠';
   const stageLabel = `阶段 ${state.stage} · ${state.stage >= 3 ? '同榻' : state.stage === 2 ? '相逢' : '同行'}`;
-  const unlockSummary = state.stage >= 3 ? '亲亲与双人床均已解锁，关闭角色不会重新上锁。' : state.stage === 2 ? '双人床：双方各 4,000，并共同工作、体验亲亲。' : '亲亲：双方各 1,000，各睡过一次，并完成面对面对话。';
+  const unlockTarget = state.stage === 1 ? 1000 : 4000;
+  const unlockSummary = state.stage >= 3 ? '亲亲与双人床均已解锁，关闭角色不会重新上锁。' : state.stage === 2 ? '双人床：羁绊 4,000，并共同工作、体验亲亲。' : '基础双人互动：羁绊 1,000，各睡过一次，并完成面对面对话。';
   element('growth-stage').textContent = stageLabel;
   element('growth-unlock-summary').textContent = unlockSummary;
+  element('bond-score').textContent = state.bond.value.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
+  element('bond-daily').textContent = `今日羁绊 ${state.bond.dailyEarned.toFixed(1)} / 800`;
+  const bondProgress = element<HTMLProgressElement>('bond-progress');
+  bondProgress.max = unlockTarget;
+  bondProgress.value = Math.min(state.bond.value, unlockTarget);
+  element('bond-companion-score').textContent = state.bond.value.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
+  element('bond-companion-summary').textContent = state.stage >= 3 ? '共同阶段已完成' : `${unlockTarget.toLocaleString('zh-CN')} 目标 · ${Math.max(0, Math.ceil(unlockTarget - state.bond.value)).toLocaleString('zh-CN')} 待积累`;
+  const bondHearts = element('bond-hearts');
+  const clampedBond = Math.min(unlockTarget, Math.max(0, state.bond.value));
+  const filledBondHearts = Math.floor((clampedBond / unlockTarget) * 5);
+  bondHearts.setAttribute('aria-valuemax', String(unlockTarget));
+  bondHearts.setAttribute('aria-valuenow', String(clampedBond));
+  bondHearts.setAttribute('aria-label', `两人羁绊 ${clampedBond.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${unlockTarget.toLocaleString('zh-CN')}`);
+  bondHearts.querySelectorAll<HTMLElement>('.heart').forEach((heart, index) => {
+    heart.classList.toggle('filled', index < filledBondHearts);
+    heart.style.setProperty('--heart-fill', `${Math.max(0, Math.min(1, clampedBond / (unlockTarget / 5) - index)) * 100}%`);
+    heart.classList.toggle('partial', index === filledBondHearts && filledBondHearts < 5 && clampedBond % (unlockTarget / 5) > 0);
+  });
   const activities = { standing: '站立', working: '工作', sleeping: '睡眠' };
   for (const id of petIds) {
     const pet = state.pets[id];
     const p = pet.progress;
-    const target = state.stage === 1 ? 1000 : 4000;
+    const target = p.personalGrowth < 1000 ? 1000 : 4000;
     element(`${id}-presence`).textContent = pet.present ? `在场 · ${activities[pet.activity]}` : '离场 · 暂停成长';
     element(`${id}-companion-presence`).textContent = pet.present ? '在场' : '离场 · 暂停成长';
     element(`${id}-companion-activity`).textContent = pet.present ? activities[pet.activity] : '暂停成长';
-    element(`${id}-score`).textContent = p.intimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
-    element(`${id}-target`).textContent = state.stage >= 3 ? '解锁已完成 · 继续记录陪伴' : `${target.toLocaleString()} 目标 · ${p.intimacy >= target ? '数值已达标，等待双方条件齐备' : `还差 ${Math.ceil(target - p.intimacy).toLocaleString()}`}`;
+    element(`${id}-score`).textContent = p.personalGrowth.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
+    element(`${id}-target`).textContent = p.personalGrowth >= 4000 ? '第二档个人里程碑已达成' : `${target.toLocaleString()} 个人目标 · 还差 ${Math.max(0, Math.ceil(target - p.personalGrowth)).toLocaleString()}`;
     const bar = element<HTMLProgressElement>(`${id}-progress`);
     bar.max = target;
-    bar.value = Math.min(p.intimacy, target);
+    bar.value = Math.min(p.personalGrowth, target);
     const companionBar = element<HTMLProgressElement>(`${id}-companion-progress`);
     companionBar.max = target;
-    companionBar.value = Math.min(p.intimacy, target);
-    const hearts = element(`${id}-hearts`);
-    const clampedIntimacy = Math.min(target, Math.max(0, p.intimacy));
-    const filledHearts = Math.floor((clampedIntimacy / target) * 5);
-    hearts.setAttribute('aria-valuemax', String(target));
-    hearts.setAttribute('aria-valuenow', String(clampedIntimacy));
-    hearts.setAttribute('aria-label', `${petNames[id]}亲密度 ${clampedIntimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`);
-    hearts.querySelectorAll<HTMLElement>('.heart').forEach((heart, index) => {
-      heart.classList.toggle('filled', index < filledHearts);
-      heart.style.setProperty('--heart-fill', `${Math.max(0, Math.min(1, clampedIntimacy / (target / 5) - index)) * 100}%`);
-      heart.classList.toggle('partial', index === filledHearts && filledHearts < 5 && clampedIntimacy % (target / 5) > 0);
-    });
-    element(`${id}-companion-summary`).textContent = `亲密度 ${p.intimacy.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`;
-    const milestones: [string, boolean][] = [['亲亲数值 1,000', p.intimacy >= 1000], ['单人睡眠', p.slept], ['面对面对话完成', p.faceCompleted], ['双人床数值 4,000', p.intimacy >= 4000], ['共同工作', p.workedTogether], ['体验亲亲', p.kissed]];
+    companionBar.value = Math.min(p.personalGrowth, target);
+    element(`${id}-companion-summary`).textContent = `个人成长 ${p.personalGrowth.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} / ${target.toLocaleString('zh-CN')}`;
+    const milestones: [string, boolean][] = [['个人成长 1,000', p.personalGrowth >= 1000], ['单人睡眠', p.slept], ['面对面对话完成', p.faceCompleted], ['个人成长 4,000', p.personalGrowth >= 4000], ['共同工作', p.workedTogether], ['体验亲亲', p.kissed]];
     const list = element(`${id}-milestones`);
     list.replaceChildren(...milestones.map(([label, done]) => {
       const item = document.createElement('li');
@@ -419,42 +452,91 @@ function renderCatalogue(state: AppSnapshot): void {
   } else element('catalogue').replaceChildren(...nodes);
 }
 
-function updateDraftStatus(): void {
-  element('draft-status').textContent = dirty.size ? `有 ${dirty.size} 项未保存；计时更新不会覆盖你的编辑。` : '所有设置已同步';
-  element<HTMLButtonElement>('save').disabled = busy || !snapshot || !dirty.size;
-  const discard = element<HTMLButtonElement>('discard');
-  discard.hidden = !dirty.size;
-  discard.disabled = busy || !dirty.size;
+function validationMessage(control: HTMLInputElement): string {
+  if (control.type !== 'number') return '';
+  return validateIntegerSetting(control.valueAsNumber, Number(control.min), Number(control.max));
 }
+
+function updateFieldError(control: HTMLInputElement): string {
+  const message = validationMessage(control);
+  control.setAttribute('aria-invalid', String(Boolean(message)));
+  let note = control.parentElement?.querySelector<HTMLElement>('.field-error');
+  if (!note && message) {
+    note = document.createElement('span');
+    note.className = 'field-error';
+    control.insertAdjacentElement('afterend', note);
+  }
+  if (note) { note.textContent = message; note.hidden = !message; }
+  return message;
+}
+
+function updateDraftStatus(): void {
+  const invalid = controls.some(control => dirty.has(control.dataset.setting as keyof Settings) && Boolean(updateFieldError(control)));
+  element('draft-status').textContent = invalid ? '请修正标出的分钟范围；无效值不会保存。'
+    : settingsSaving ? '正在保存…' : dirty.size ? saveMessage : '已自动保存';
+  element('draft-status').classList.toggle('is-error', invalid || saveMessage.startsWith('保存失败'));
+}
+
+function scheduleSettingsSave(delay = 400): void {
+  if (saveTimer !== undefined) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => { saveTimer = undefined; void saveSettings(); }, delay);
+}
+
+async function saveSettings(): Promise<void> {
+  if (!hasTauri || preview || disposed || settingsSaving || busy || !snapshot || !dirty.size) return;
+  const settings = { ...snapshot.settings };
+  const captured = new Map<keyof Settings, number>();
+  for (const control of controls) {
+    const key = control.dataset.setting as keyof Settings;
+    if (!dirty.has(key) || updateFieldError(control)) continue;
+    Object.assign(settings, { [key]: control.type === 'checkbox' ? control.checked : control.valueAsNumber });
+    captured.set(key, editVersions.get(key) ?? 0);
+  }
+  if (!captured.size) { updateDraftStatus(); return; }
+  settingsSaving = true;
+  saveMessage = '正在保存…';
+  updateDraftStatus();
+  const revision = snapshot.revision;
+  let saved = false;
+  try {
+    const next = await invoke<AppSnapshot>('dispatch_action', { action: { kind: 'settings', settings }, expectedRevision: revision });
+    for (const [key, version] of captured) {
+      if (savedEditIsCurrent(version, editVersions.get(key) ?? 0)) dirty.delete(key);
+    }
+    saveMessage = '已自动保存';
+    accept(next);
+    saved = true;
+  } catch (error) {
+    saveMessage = `保存失败：${formatError(error)}`;
+    try { await refresh(); } catch { /* Keep the user's valid input for a later retry. */ }
+  } finally {
+    settingsSaving = false;
+    render();
+    const hasNewerEdit = [...dirty].some(key => !captured.has(key) || (editVersions.get(key) ?? 0) > (captured.get(key) ?? 0));
+    if ((saved || hasNewerEdit) && [...dirty].some(key => {
+      const control = controls.find(item => item.dataset.setting === key);
+      return control && !validationMessage(control);
+    })) scheduleSettingsSave(0);
+  }
+}
+
 for (const control of controls) {
-  control.addEventListener('input', () => {
-    dirty.add(control.dataset.setting as keyof Settings);
+  const edited = () => {
+    const key = control.dataset.setting as keyof Settings;
+    dirty.add(key);
+    editVersions.set(key, (editVersions.get(key) ?? 0) + 1);
+    saveMessage = '等待自动保存…';
+    updateFieldError(control);
     updateDraftStatus();
+    scheduleSettingsSave(control.type === 'checkbox' ? 0 : 400);
+  };
+  control.addEventListener(control.type === 'checkbox' ? 'change' : 'input', edited);
+  if (control.type === 'number') control.addEventListener('blur', () => {
+    updateFieldError(control);
+    scheduleSettingsSave(0);
   });
 }
 for (const button of actionButtons) button.addEventListener('click', () => void dispatch({ kind: button.dataset.action! }));
-element('discard').addEventListener('click', () => { dirty.clear(); showError(''); render(); });
-element('save').addEventListener('click', () => {
-  if (!snapshot || busy) return;
-  // Merge only locally edited fields into the latest server settings.
-  const settings = { ...snapshot.settings };
-  for (const control of controls) {
-    const key = control.dataset.setting as keyof Settings;
-    if (!dirty.has(key)) continue;
-    if (control.type === 'checkbox') Object.assign(settings, { [key]: control.checked });
-    else {
-      const value = control.valueAsNumber;
-      if (!Number.isInteger(value) || value < Number(control.min) || value > Number(control.max)) {
-        showError(`请输入 ${control.min}–${control.max} 之间的整数分钟。`);
-        activateTab('settings');
-        control.focus();
-        return;
-      }
-      Object.assign(settings, { [key]: value });
-    }
-  }
-  void dispatch({ kind: 'settings', settings });
-});
 element('refresh').addEventListener('click', () => void connectOrRefresh());
 element('input-access').addEventListener('click', async () => {
   if (!hasTauri) return;
