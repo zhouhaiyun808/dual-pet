@@ -1,7 +1,8 @@
 # V0.3 验收反馈修复结果
 
 > 对应计划：`docs/V03_ACCEPTANCE_FIX_PLAN.md`
-> 状态：实现与本地自动验证完成；Windows / macOS GitHub 打包结果待本次提交工作流回填。
+> 状态：实现、本地自动验证、Windows 与 macOS GitHub 打包均完成。
+> 打包代码提交：`6ed01f7d1f7efd388e416dab0cbd632e09635d4f`
 
 ## 实现进度
 
@@ -22,9 +23,10 @@
 - 前端全量测试：`npm test`，64 / 64 通过。
 - Rust logic：`npm run test:logic`，state 52、store 10、input 19、runtime 4，共 85 / 85 通过。
 - 前端生产构建：`npm run build` 通过。
-- macOS 本地原生构建：`node scripts/build.mjs --bundles app` 通过，生成 ad-hoc 签名的 `Dual Pet.app`。默认同时生成 DMG 的本地命令在 `bundle_dmg.sh` 阶段失败；GitHub workflow 使用 app + zip，不依赖该本地 DMG 步骤。
-- Windows GitHub workflow：待工作流完成后回填。
-- macOS GitHub workflow（x64 / arm64）：待工作流完成后回填。
+- macOS 本地原生构建：`node scripts/build.mjs --bundles app` 通过，生成并严格校验 ad-hoc 签名的 x86_64 `Dual Pet.app`（约 24MB）。默认同时生成 DMG 的本地命令在 `bundle_dmg.sh` 阶段失败；GitHub workflow 使用 app + zip，不依赖该本地 DMG 步骤。
+- Windows GitHub workflow：成功（15m33s）。产物 `dual-pet-windows-x64-test`，GitHub artifact 15,902,684 bytes；内含 `Dual Pet_0.3.0_x64-setup.exe`、SHA256、下载说明、验收文档与许可证。下载后复算 SHA256 与清单一致。
+- macOS GitHub workflow：x64 成功（2m12s），arm64 成功（1m55s）。产物分别为 `dual-pet-macos-x64-test`（17,139,229 bytes）和 `dual-pet-macos-arm64-test`（16,970,885 bytes）；内含对应架构 app zip、SHA256、下载说明、验收文档与许可证。两个下载产物复算 SHA256 均通过。
+- 工作流链接：Windows `https://github.com/zhouhaiyun808/dual-pet/actions/runs/35768383325`；macOS `https://github.com/zhouhaiyun808/dual-pet/actions/runs/35768383489`。
 
 ## 双端人工验收
 
