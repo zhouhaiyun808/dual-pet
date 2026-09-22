@@ -24,11 +24,11 @@ export function desktopWidgetContext(paired: boolean, pet: PetId): DesktopWidget
 }
 
 export interface DesktopWidgetView {
-  phase: '待开始' | '专注' | '休息' | '暂停';
+  phase: '准备' | '专注' | '休息' | '暂停';
   time: string;
   keys: string;
   clicks: string;
-  control: 'pause' | 'resume' | null;
+  control: 'start' | 'pause' | 'resume';
   controlDisabled: boolean;
 }
 
@@ -39,11 +39,11 @@ export function desktopWidgetView(snapshot: AppSnapshot, live: InputCounts | nul
     : Math.max(0, Math.ceil(snapshot.pomodoro.remainingSeconds));
   const counts = displayedTotalCounts(snapshot, live);
   return {
-    phase: phase === 'focus' ? '专注' : phase === 'break' ? '休息' : phase === 'paused' ? '暂停' : '待开始',
+    phase: phase === 'focus' ? '专注' : phase === 'break' ? '休息' : phase === 'paused' ? '暂停' : '准备',
     time: `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`,
     keys: counts.todayKeys.toLocaleString('zh-CN'),
     clicks: counts.todayClicks.toLocaleString('zh-CN'),
-    control: phase === 'focus' || phase === 'break' ? 'pause' : phase === 'paused' ? 'resume' : null,
-    controlDisabled: phase === 'paused' && Boolean(snapshot.sleepSlot),
+    control: phase === 'focus' || phase === 'break' ? 'pause' : phase === 'paused' ? 'resume' : 'start',
+    controlDisabled: (phase === 'idle' || phase === 'paused') && Boolean(snapshot.sleepSlot),
   };
 }

@@ -26,6 +26,7 @@ pub const KISS_THRESHOLD: f64 = 1000.0;
 pub const BED_THRESHOLD: f64 = 4000.0;
 const MAX_TICK_GAP: i64 = 5;
 const COOLDOWN: f64 = 60.0;
+const MAX_DIALOGUE_CHARS: usize = 28;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PetId {
@@ -109,6 +110,10 @@ pub struct Settings {
     pub long_break_enabled: bool,
     pub lunch_enabled: bool,
     pub night_enabled: bool,
+    pub lunch_start_minutes: u16,
+    pub lunch_end_minutes: u16,
+    pub night_start_minutes: u16,
+    pub night_end_minutes: u16,
     pub input_enabled: bool,
     pub bubbles_enabled: bool,
 }
@@ -117,7 +122,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self { focus_minutes: 25, break_minutes: 5, long_break_minutes: 15,
             auto_next: false, long_break_enabled: true, lunch_enabled: true,
-            night_enabled: true, input_enabled: true, bubbles_enabled: true }
+            night_enabled: true, lunch_start_minutes: 750, lunch_end_minutes: 840,
+            night_start_minutes: 1320, night_end_minutes: 480,
+            input_enabled: true, bubbles_enabled: true }
     }
 }
 impl Settings {
@@ -126,6 +133,12 @@ impl Settings {
             || !(1..=60).contains(&self.break_minutes)
             || !(1..=60).contains(&self.long_break_minutes) {
             return Err("专注时长应为 5–120 分钟，休息时长应为 1–60 分钟".into());
+        }
+        if [self.lunch_start_minutes, self.lunch_end_minutes, self.night_start_minutes, self.night_end_minutes]
+            .into_iter().any(|minute| minute >= 24 * 60)
+            || self.lunch_start_minutes == self.lunch_end_minutes
+            || self.night_start_minutes == self.night_end_minutes {
+            return Err("睡眠时间应为有效且不同的开始、结束时间".into());
         }
         Ok(())
     }
@@ -270,6 +283,7 @@ pub struct Core {
     focus_seconds: BTreeMap<PetId, f64>,
     ordinary_working: bool,
     ordinary_remaining: f64,
+    solo_dialogue_cooldown: f64,
     dialogue_cooldown: f64,
     next_dialogue_id: u64,
 }
@@ -294,7 +308,7 @@ impl Core {
             skipped_slot: None, epoch: 0, pair_restore: None,
             minute_budgets: BTreeMap::new(), focus_seconds: BTreeMap::new(),
             ordinary_working: true, ordinary_remaining: 25.0 * 60.0,
-            dialogue_cooldown: 0.0, next_dialogue_id: 1,
+            solo_dialogue_cooldown: 0.0, dialogue_cooldown: 0.0, next_dialogue_id: 1,
         };
         core.reconcile_schedule(&clock);
         core
@@ -420,6 +434,7 @@ impl Core {
                 self.split_internal();
                 self.cancel_dialogue();
                 self.set_activity(id, activity);
+                self.start_solo_dialogue(id);
             }
             "pair-sleep-toggle" => {
                 let id = required_pet()?;
@@ -460,6 +475,9 @@ impl Core {
                 let stationary = self.pet(id.other()).activity;
                 if stationary == Activity::Sleeping && self.state.stage < 3 {
                     return Err("double sleep is not unlocked".into());
+                }
+                if self.state.dialogue.as_ref().is_some_and(|d| d.kind == "solo-growth") {
+                    self.cancel_dialogue();
                 }
                 self.pair_restore = Some(PairRestore {
                     activities: [self.pet(PetId::A).activity, self.pet(PetId::B).activity], epoch: self.epoch,
@@ -553,6 +571,7 @@ impl Core {
             else if input.input_available { "available" } else { "unavailable" }.into();
         if valid_interval {
             self.dialogue_cooldown = (self.dialogue_cooldown - input.elapsed_seconds).max(0.0);
+            self.solo_dialogue_cooldown = (self.solo_dialogue_cooldown - input.elapsed_seconds).max(0.0);
             // Boundary intervals are discarded rather than misattributing the final
             // pre-sleep second to a paused focus session or a changed activity.
             if !boundary {
@@ -868,23 +887,53 @@ impl Core {
     }
     fn start_pair_dialogue(&mut self, kind: &str) -> bool {
         if !self.state.settings.bubbles_enabled || self.dialogue_cooldown > 0.0 { return false; }
-        // Exact IDs, speakers and excerpts from src/dialogue-catalog.ts. The
-        // work invitation has no spoken response in its source; do not invent one.
+        // Keep stable collection IDs and text in sync with src/dialogue-catalog.ts.
+        // Adapted replies are explicitly labelled in the collection.
         let scenes = vec![
             ("face-dialogue", "face-dialogue", vec![
-                DialogueLine { speaker: Speaker::A, text: "好箭术！".into() },
-                DialogueLine { speaker: Speaker::B, text: "闭嘴。小心！".into() },
+                DialogueLine { speaker: Speaker::A, text: "你一直跟着我。".into() },
+                DialogueLine { speaker: Speaker::B, text: "你动静大，好探路。".into() },
             ]),
             ("shared-work", "shared-work", vec![
                 DialogueLine { speaker: Speaker::A, text: "喝酒去吗，江晏？".into() },
+                DialogueLine { speaker: Speaker::B, text: "走。酒在哪儿？".into() },
+                DialogueLine { speaker: Speaker::A, text: "早备好了，就等江大侠点头。".into() },
             ]),
-            ("jiangnan-reply", "face-dialogue", vec![DialogueLine { speaker: Speaker::B, text: "不如你。还敢邀我游江南。".into() }]),
-            ("delight", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "痛快！".into() }]),
-            ("travel-together", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "不如，你我同往？".into() }]),
-            ("together", "shared-work", vec![DialogueLine { speaker: Speaker::A, text: "也罢，总归还有我同你一道。".into() }]),
-            ("trouble", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "连绣金楼都出手了？你这回惹得麻烦可真不小。".into() }]),
-            ("joking", "face-dialogue", vec![DialogueLine { speaker: Speaker::A, text: "哈，走投无路的日子久了，冷心冷面的江大侠都会说笑了？稀罕！".into() }]),
-            ("drink-together", "shared-work", vec![DialogueLine { speaker: Speaker::A, text: "此情此景，与尔共饮，岂非美酒乎？".into() }]),
+            ("jiangnan-reply", "face-dialogue", vec![
+                DialogueLine { speaker: Speaker::B, text: "欠你一坛，下回我请。".into() },
+                DialogueLine { speaker: Speaker::A, text: "行啊，来回春堂找我。若是不在，那便是出诊去了，把酒给我留着！".into() },
+                DialogueLine { speaker: Speaker::B, text: "好。".into() },
+            ]),
+            ("delight", "face-dialogue", vec![
+                DialogueLine { speaker: Speaker::A, text: "痛快！".into() },
+                DialogueLine { speaker: Speaker::B, text: "还笑得出来？".into() },
+                DialogueLine { speaker: Speaker::A, text: "你在前头开路，我自然笑得出来。".into() },
+            ]),
+            ("travel-together", "face-dialogue", vec![
+                DialogueLine { speaker: Speaker::B, text: "下次见面，我请你喝酒。".into() },
+                DialogueLine { speaker: Speaker::A, text: "下次是哪次？".into() },
+                DialogueLine { speaker: Speaker::B, text: "你来找我，就是下次。".into() },
+            ]),
+            ("together", "shared-work", vec![
+                DialogueLine { speaker: Speaker::A, text: "也罢，总归还有我同你一道。".into() },
+                DialogueLine { speaker: Speaker::B, text: "那就坐稳。".into() },
+                DialogueLine { speaker: Speaker::A, text: "有你这句话，今夜便不走了。".into() },
+            ]),
+            ("trouble", "face-dialogue", vec![
+                DialogueLine { speaker: Speaker::A, text: "连绣金楼都出手了？你这回惹得麻烦可真不小。".into() },
+                DialogueLine { speaker: Speaker::B, text: "怕了？".into() },
+                DialogueLine { speaker: Speaker::A, text: "怕你独占风头。左边归我，如何？".into() },
+            ]),
+            ("joking", "face-dialogue", vec![
+                DialogueLine { speaker: Speaker::A, text: "哈，江大侠也会拿我打趣了？".into() },
+                DialogueLine { speaker: Speaker::B, text: "跟你学的。".into() },
+                DialogueLine { speaker: Speaker::A, text: "好学生。只是这束脩，可得请酒来付。".into() },
+            ]),
+            ("drink-together", "shared-work", vec![
+                DialogueLine { speaker: Speaker::A, text: "此情此景，与尔共饮，岂非美酒乎？".into() },
+                DialogueLine { speaker: Speaker::B, text: "酒不错。再斟一杯。".into() },
+                DialogueLine { speaker: Speaker::A, text: "难得江大侠开口，今夜定让你尽兴。".into() },
+            ]),
         ];
         let mut eligible: Vec<_> = scenes.into_iter().filter(|(_, trigger, _)| *trigger == kind).collect();
         if eligible.is_empty() { return false; }
@@ -897,8 +946,52 @@ impl Core {
         self.start_dialogue(kind, lines);
         true
     }
+    fn start_solo_dialogue(&mut self, pet: PetId) -> bool {
+        if !self.state.settings.bubbles_enabled || self.solo_dialogue_cooldown > 0.0 || self.dialogue_cooldown > 0.0
+            || self.state.dialogue.is_some() || self.state.pair.is_some()
+            || !self.pet(pet).present || self.pet(pet).activity == Activity::Sleeping { return false; }
+        let scenes = [
+            ("solo-a-01", PetId::A, 0.0, "既在一张案前，也算同席了。别拘着。"),
+            ("solo-a-02", PetId::A, 0.0, "书得一页页读。若一眼便懂，我倒要疑它藏私了。"),
+            ("solo-a-03", PetId::A, 0.0, "路长着呢。先把眼前这一程走好，奇闻不会跑。"),
+            ("solo-a-04", PetId::A, 0.0, "忙完这一桩，容我讨一刻清闲，可好？"),
+            ("solo-a-05", PetId::A, 1000.0, "又是你。好，今日便省了客套，坐近些。"),
+            ("solo-a-06", PetId::A, 1000.0, "只顾盯着招式，容易忘了持剑的是人。你说是不是？"),
+            ("solo-a-07", PetId::A, 1000.0, "不懂便问。闷着不说，书可不会自己开口。"),
+            ("solo-a-08", PetId::A, 1000.0, "这边的位置给你留着。事再多，也不妨坐下慢慢理。"),
+            ("solo-a-09", PetId::A, 4000.0, "你做你的，我在这儿翻会儿书。放心，今日不催你。"),
+            ("solo-a-10", PetId::A, 4000.0, "眉头都打结了，还说不累？歇会儿，我又不笑你。"),
+            ("solo-a-11", PetId::A, 4000.0, "今日碰着件有趣的事，头一个便想讲给你听。"),
+            ("solo-a-12", PetId::A, 4000.0, "今日到这里。明日的趣事，咱们明日再说。"),
+            ("solo-b-01", PetId::B, 0.0, "先把手稳住。快，不在这一时。"),
+            ("solo-b-02", PetId::B, 0.0, "这页还没看完。你先坐。"),
+            ("solo-b-03", PetId::B, 0.0, "再练一遍。根基扎实些，出手才有底。"),
+            ("solo-b-04", PetId::B, 0.0, "收收心。先做眼前的事。"),
+            ("solo-b-05", PetId::B, 1000.0, "今日比昨日稳。自己没察觉？"),
+            ("solo-b-06", PetId::B, 1000.0, "累了就停。歇一刻，功夫丢不了。"),
+            ("solo-b-07", PetId::B, 1000.0, "还要忙？灯留着，我坐一会儿。"),
+            ("solo-b-08", PetId::B, 1000.0, "路要自己走。有拿不准的，可以问我。"),
+            ("solo-b-09", PetId::B, 4000.0, "我不催。等你把这件事做完。"),
+            ("solo-b-10", PetId::B, 4000.0, "又忘了时辰？东西放下，先歇。"),
+            ("solo-b-11", PetId::B, 4000.0, "你的主意，我听着。想好了就去做。"),
+            ("solo-b-12", PetId::B, 4000.0, "回去睡。明日这个时候，我还在。"),
+        ];
+        let growth = self.pet(pet).progress.intimacy;
+        let eligible: Vec<_> = scenes.iter().filter(|(_, owner, minimum, _)| *owner == pet && growth >= *minimum).collect();
+        let Some(scene) = eligible.iter().find(|(id, _, _, _)| !self.state.unlocked_dialogues.iter().any(|known| known == id))
+            .or_else(|| if eligible.is_empty() { None } else { eligible.get(fastrand::usize(..eligible.len())) }) else { return false; };
+        let (id, _, _, text) = **scene;
+        self.remember_dialogue(id);
+        self.solo_dialogue_cooldown = COOLDOWN;
+        self.start_dialogue("solo-growth", vec![DialogueLine {
+            speaker: if pet == PetId::A { Speaker::A } else { Speaker::B }, text: text.into(),
+        }]);
+        true
+    }
     fn start_dialogue(&mut self, kind: &str, lines: Vec<DialogueLine>) {
-        let remaining_seconds = line_duration(&lines[0].text);
+        let lines = split_dialogue_lines(lines);
+        if lines.is_empty() { return; }
+        let remaining_seconds = dialogue_line_duration(kind, &lines[0].text);
         self.state.dialogue = Some(Dialogue { id: self.next_dialogue_id,
             lines, index: 0, remaining_seconds, kind: kind.into() });
         self.next_dialogue_id = self.next_dialogue_id.saturating_add(1);
@@ -906,13 +999,13 @@ impl Core {
     fn break_reminder(&mut self) {
         if self.state.settings.bubbles_enabled && !self.none_present() {
             self.start_dialogue("break-reminder", vec![DialogueLine {
-                speaker: Speaker::System, text: "休息时间到了，起来活动一下吧。".into(),
+                speaker: Speaker::System, text: "休息一下，起来动动吧。".into(),
             }]);
         }
     }
     fn cancel_dialogue(&mut self) {
         if let Some(dialogue) = self.state.dialogue.take() {
-            if dialogue.kind != "break-reminder" { self.dialogue_cooldown = COOLDOWN; }
+            if dialogue.kind != "break-reminder" && dialogue.kind != "solo-growth" { self.dialogue_cooldown = COOLDOWN; }
         }
     }
     fn advance_dialogue(&mut self, mut elapsed: f64) {
@@ -924,12 +1017,12 @@ impl Core {
             if dialogue.remaining_seconds > 0.0 { return; }
             dialogue.index += 1;
             if dialogue.index < dialogue.lines.len() {
-                dialogue.remaining_seconds = line_duration(&dialogue.lines[dialogue.index].text);
+                dialogue.remaining_seconds = dialogue_line_duration(&dialogue.kind, &dialogue.lines[dialogue.index].text);
                 continue;
             }
             let kind = dialogue.kind.clone();
             self.state.dialogue = None;
-            if kind != "break-reminder" { self.dialogue_cooldown = COOLDOWN; }
+            if kind != "break-reminder" && kind != "solo-growth" { self.dialogue_cooldown = COOLDOWN; }
             if kind == "face-dialogue" && self.state.pair.as_ref().is_some_and(|pair| pair.mode == PairMode::FaceDialogue) {
                 for id in PetId::ALL { self.pet_mut(id).progress.face_completed = true; }
                 self.check_unlocks();
@@ -1028,17 +1121,50 @@ fn semantic_change(a: &AppSnapshot, b: &AppSnapshot) -> bool {
 }
 
 pub fn line_duration(text: &str) -> f64 { (text.chars().count() as f64 / 6.0).clamp(3.0, 7.0) }
+fn dialogue_line_duration(kind: &str, text: &str) -> f64 {
+    if kind == "break-reminder" { 10.0 } else { line_duration(text) }
+}
+
+fn split_dialogue_text(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= MAX_DIALOGUE_CHARS { return vec![text.into()]; }
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while chars.len() - start > MAX_DIALOGUE_CHARS {
+        let end = (start + MAX_DIALOGUE_CHARS).min(chars.len());
+        let window = &chars[start..end];
+        let strong = window.iter().rposition(|c| matches!(c, '。' | '！' | '？' | '；' | '…'));
+        let weak = window.iter().rposition(|c| matches!(c, '，' | '、' | '：'));
+        let split = start + strong.or(weak).map_or(MAX_DIALOGUE_CHARS, |index| index + 1);
+        parts.push(chars[start..split].iter().collect());
+        start = split;
+    }
+    if start < chars.len() { parts.push(chars[start..].iter().collect()); }
+    parts
+}
+
+fn split_dialogue_lines(lines: Vec<DialogueLine>) -> Vec<DialogueLine> {
+    lines.into_iter().flat_map(|line| {
+        split_dialogue_text(&line.text).into_iter().map(move |text| DialogueLine { speaker: line.speaker, text })
+    }).collect()
+}
 
 /// Slot IDs cover one complete overnight interval, including its next-day tail.
 pub fn sleep_slot(clock: &Clock, settings: &Settings) -> Option<String> {
     if !clock.valid() { return None; }
     let minute = clock.local_minute;
-    if settings.lunch_enabled && (750..840).contains(&minute) {
-        Some(format!("lunch:{}", clock.local_date))
-    } else if settings.night_enabled && minute >= 1320 {
-        Some(format!("night:{}", clock.local_date))
-    } else if settings.night_enabled && minute < 480 {
-        Some(format!("night:{}", previous_date(&clock.local_date)?))
+    schedule_slot("lunch", settings.lunch_enabled, settings.lunch_start_minutes, settings.lunch_end_minutes, minute, &clock.local_date)
+        .or_else(|| schedule_slot("night", settings.night_enabled, settings.night_start_minutes, settings.night_end_minutes, minute, &clock.local_date))
+}
+
+fn schedule_slot(kind: &str, enabled: bool, start: u16, end: u16, minute: u16, date: &str) -> Option<String> {
+    if !enabled || start == end || start >= 24 * 60 || end >= 24 * 60 { return None; }
+    if start < end {
+        (start..end).contains(&minute).then(|| format!("{kind}:{date}"))
+    } else if minute >= start {
+        Some(format!("{kind}:{date}"))
+    } else if minute < end {
+        Some(format!("{kind}:{}", previous_date(date)?))
     } else { None }
 }
 
@@ -1216,6 +1342,10 @@ mod tests {
         assert_eq!(value["settings"]["focusMinutes"], 25);
         assert_eq!(value["settings"]["breakMinutes"], 5);
         assert_eq!(value["settings"]["longBreakMinutes"], 15);
+        assert_eq!(value["settings"]["lunchStartMinutes"], 750);
+        assert_eq!(value["settings"]["lunchEndMinutes"], 840);
+        assert_eq!(value["settings"]["nightStartMinutes"], 1320);
+        assert_eq!(value["settings"]["nightEndMinutes"], 480);
         assert!(value["pets"]["pet-a"]["progress"]["dailyEarned"].is_number());
         assert!(value["pets"]["pet-a"]["progress"]["personalGrowth"].is_number());
         assert!(value["pets"]["pet-a"]["progress"].get("intimacy").is_none());
@@ -1235,6 +1365,34 @@ mod tests {
         assert_eq!(sleep_slot(&Clock::new(0, "2024-03-01", 1), &s).as_deref(), Some("night:2024-02-29"));
         assert_eq!(sleep_slot(&Clock::new(0, "2025-03-01", 1), &s).as_deref(), Some("night:2025-02-28"));
         assert!(sleep_slot(&Clock::new(0, "2026-02-30", 1), &s).is_none());
+    }
+
+    #[test]
+    fn custom_sleep_slots_apply_immediately_and_support_overnight_ranges() {
+        let mut s = Settings::default();
+        s.lunch_start_minutes = 720; s.lunch_end_minutes = 765;
+        s.night_start_minutes = 1350; s.night_end_minutes = 510;
+        assert_eq!(sleep_slot(&Clock::new(0, "2026-09-14", 720), &s).as_deref(), Some("lunch:2026-09-14"));
+        assert!(sleep_slot(&Clock::new(0, "2026-09-14", 765), &s).is_none());
+        assert_eq!(sleep_slot(&Clock::new(0, "2026-09-14", 1380), &s).as_deref(), Some("night:2026-09-14"));
+        assert_eq!(sleep_slot(&Clock::new(0, "2026-09-15", 500), &s).as_deref(), Some("night:2026-09-14"));
+        assert!(sleep_slot(&Clock::new(0, "2026-09-15", 510), &s).is_none());
+
+        let mut c = Core::new(Clock::new(0, "2026-09-14", 700));
+        let mut action = action("settings", None); action.settings = Some(s);
+        c.dispatch(action, None, Clock::new(1, "2026-09-14", 720)).unwrap();
+        assert_eq!(c.state.sleep_slot.as_deref(), Some("lunch:2026-09-14"));
+    }
+
+    #[test]
+    fn legacy_settings_missing_schedule_fields_use_existing_defaults() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        for key in ["lunchStartMinutes", "lunchEndMinutes", "nightStartMinutes", "nightEndMinutes"] {
+            value.as_object_mut().unwrap().remove(key);
+        }
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        assert_eq!((restored.lunch_start_minutes, restored.lunch_end_minutes), (750, 840));
+        assert_eq!((restored.night_start_minutes, restored.night_end_minutes), (1320, 480));
     }
 
     #[test]
@@ -1325,7 +1483,7 @@ mod tests {
                 assert_eq!(c.state.pair.as_ref().unwrap().mode,
                     if stationary == Activity::Standing { PairMode::FaceDialogue } else { PairMode::SharedWork });
                 assert!(c.pet(PetId::A).present && c.pet(PetId::B).present);
-                seconds(&mut c, 8); command(&mut c, action("split", None));
+                seconds(&mut c, 22); command(&mut c, action("split", None));
                 assert_eq!(c.pet(PetId::A).activity, dragged);
                 assert_eq!(c.pet(PetId::B).activity, stationary);
             }
@@ -1456,7 +1614,7 @@ mod tests {
         assert!(c.state.dialogue.is_none()); assert!(!c.dialogue_locks_drag());
         assert_eq!(c.state.stage, 2); assert_eq!(c.state.pair.as_ref().unwrap().mode, PairMode::Kiss);
         for id in PetId::ALL { assert!(c.pet(id).progress.face_completed && c.pet(id).progress.kissed); }
-        assert_eq!(c.state.unlocked_dialogues, ["face-dialogue"]);
+        assert_eq!(c.state.unlocked_dialogues, ["solo-a-01", "face-dialogue"]);
     }
 
     #[test]
@@ -1513,7 +1671,7 @@ mod tests {
         seconds(&mut c, 1); assert!(c.state.dialogue.is_none());
         command(&mut c, action("split", None)); command(&mut c, action("join", Some(PetId::A)));
         assert!(c.state.dialogue.is_some());
-        assert_eq!(c.state.unlocked_dialogues, ["face-dialogue", "jiangnan-reply"]);
+        assert_eq!(c.state.unlocked_dialogues, ["solo-b-01", "face-dialogue", "jiangnan-reply"]);
     }
 
     #[test]
@@ -1525,9 +1683,31 @@ mod tests {
             assert!(catalogue.contains(&format!("id: '{kind}'")));
             let d = c.state.dialogue.as_ref().unwrap();
             for line in &d.lines { assert!(catalogue.contains(&format!("text: '{}'", line.text))); }
-            assert_eq!(d.lines.len(), if kind == "face-dialogue" { 2 } else { 1 });
+            assert_eq!(d.lines.len(), if kind == "face-dialogue" { 2 } else { 3 });
         }
         assert_eq!(line_duration("短句"), 3.0); assert_eq!(line_duration(&"字".repeat(100)), 7.0);
+    }
+
+    #[test]
+    fn long_dialogue_is_split_without_loss_and_keeps_the_speaker() {
+        let text = "甲乙丙丁戊己庚辛壬癸，前半仍在继续。后半也要完整保留，而且不能漏字不能重字！最后收尾。";
+        let parts = split_dialogue_text(text);
+        assert!(parts.len() >= 2);
+        assert_eq!(parts.concat(), text);
+        assert!(parts.iter().all(|part| part.chars().count() <= MAX_DIALOGUE_CHARS));
+        let lines = split_dialogue_lines(vec![DialogueLine { speaker: Speaker::B, text: text.into() }]);
+        assert_eq!(lines.iter().map(|line| line.text.as_str()).collect::<String>(), text);
+        assert!(lines.iter().all(|line| line.speaker == Speaker::B));
+    }
+
+    #[test]
+    fn break_reminder_uses_the_short_fixed_copy() {
+        let mut c = Core::new(clock());
+        c.break_reminder();
+        let line = &c.state.dialogue.as_ref().unwrap().lines[0];
+        assert_eq!(line.speaker, Speaker::System);
+        assert_eq!(line.text, "休息一下，起来动动吧。");
+        assert_eq!(c.state.dialogue.as_ref().unwrap().remaining_seconds, 10.0);
     }
 
     #[test]
@@ -1542,9 +1722,10 @@ mod tests {
                 assert!(catalogue.contains(&format!("id: '{id}'")));
                 let d = c.state.dialogue.as_ref().unwrap();
                 assert_eq!(d.kind, kind);
-                for line in &d.lines {
-                    assert!(catalogue.contains(&format!("speaker: 'pet-{}', text: '{}'", if matches!(line.speaker, Speaker::A) { "a" } else { "b" }, line.text)));
-                }
+                assert!(d.lines.len() >= 2);
+                assert!(d.lines.iter().all(|line| line.text.chars().count() <= MAX_DIALOGUE_CHARS));
+                assert!(d.lines.iter().any(|line| line.speaker == Speaker::A));
+                assert!(d.lines.iter().any(|line| line.speaker == Speaker::B));
             }
             assert_eq!(c.state.unlocked_dialogues.len(), count);
             c.dialogue_cooldown = 0.0;
@@ -1553,6 +1734,56 @@ mod tests {
             c.state.settings.bubbles_enabled = false;
             assert!(!c.start_pair_dialogue(kind));
         }
+    }
+
+    #[test]
+    fn solo_growth_gates_each_owner_and_preserves_pair_milestones() {
+        let catalogue = include_str!("../../src/dialogue-catalog.ts");
+        for pet in PetId::ALL {
+            let mut c = Core::new(clock());
+            for (growth, count) in [(0.0, 4), (999.0, 4), (1000.0, 8), (3999.0, 8), (4000.0, 12)] {
+                c.pet_mut(pet).progress.intimacy = growth;
+                for _ in 0..count {
+                    c.cancel_dialogue(); c.solo_dialogue_cooldown = 0.0;
+                    assert!(c.start_solo_dialogue(pet));
+                    let d = c.state.dialogue.as_ref().unwrap();
+                    assert_eq!(d.kind, "solo-growth");
+                    assert_eq!(d.lines.len(), 1);
+                    let speaker = if pet == PetId::A { "a" } else { "b" };
+                    assert!(catalogue.contains(&format!("speaker: 'pet-{speaker}', text: '{}'", d.lines[0].text)));
+                    assert!(catalogue.contains(&format!("id: '{}'", c.state.unlocked_dialogues.last().unwrap())));
+                    assert!(!c.start_solo_dialogue(pet));
+                    c.advance_dialogue(8.0);
+                    assert!(!c.start_solo_dialogue(pet)); // separate solo cooldown
+                }
+                assert_eq!(c.state.unlocked_dialogues.len(), count);
+            }
+            assert_eq!(c.state.stage, 1);
+            for id in PetId::ALL {
+                assert!(!c.pet(id).progress.face_completed);
+                assert!(!c.pet(id).progress.worked_together);
+            }
+        }
+    }
+
+    #[test]
+    fn solo_activity_trigger_respects_sleep_absence_bubbles_and_pair_priority() {
+        let mut c = Core::new(clock());
+        activity(&mut c, PetId::A, Activity::Standing);
+        assert_eq!(c.state.dialogue.as_ref().unwrap().kind, "solo-growth");
+        command(&mut c, action("join", Some(PetId::A)));
+        assert_ne!(c.state.dialogue.as_ref().unwrap().kind, "solo-growth");
+        c.solo_dialogue_cooldown = 0.0;
+        assert!(!c.start_solo_dialogue(PetId::A));
+        c.cancel_dialogue(); c.split_internal(); c.dialogue_cooldown = 0.0;
+        c.set_activity(PetId::A, Activity::Sleeping);
+        assert!(!c.start_solo_dialogue(PetId::A));
+        c.set_activity(PetId::A, Activity::Standing);
+        c.pet_mut(PetId::A).present = false;
+        assert!(!c.start_solo_dialogue(PetId::A));
+        c.pet_mut(PetId::A).present = true;
+        c.state.settings.bubbles_enabled = false;
+        assert!(!c.start_solo_dialogue(PetId::A));
     }
 
     #[test]

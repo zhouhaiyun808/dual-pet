@@ -1,30 +1,30 @@
 import type { Sprite, WorkFrame, WorkScene } from './assets';
 
-type WorkBeat = { frame: WorkFrame; durationMs: number };
+export type WorkBeat = { frame: WorkFrame; durationMs: number };
 
 const workLoops: Record<WorkScene, readonly WorkBeat[]> = {
   'solo-chen': [
     { frame: 'idle', durationMs: 2400 },
-    { frame: 'chen-blink', durationMs: 90 },
-    { frame: 'idle', durationMs: 1510 },
-    { frame: 'chen-stroke', durationMs: 260 },
-    { frame: 'idle', durationMs: 4740 },
+    { frame: 'chen-blink', durationMs: 160 },
+    { frame: 'idle', durationMs: 2240 },
+    { frame: 'chen-stroke', durationMs: 380 },
+    { frame: 'idle', durationMs: 4820 },
   ],
   'solo-jiang': [
     { frame: 'idle', durationMs: 3000 },
-    { frame: 'jiang-blink', durationMs: 90 },
-    { frame: 'idle', durationMs: 2910 },
+    { frame: 'jiang-blink', durationMs: 160 },
+    { frame: 'idle', durationMs: 2840 },
     { frame: 'jiang-book-closed', durationMs: 1100 },
     { frame: 'idle', durationMs: 3900 },
   ],
   'dual-jiangchen': [
     { frame: 'idle', durationMs: 2200 },
-    { frame: 'chen-blink', durationMs: 90 },
-    { frame: 'idle', durationMs: 2110 },
-    { frame: 'jiang-blink', durationMs: 90 },
-    { frame: 'idle', durationMs: 2810 },
-    { frame: 'chen-stroke', durationMs: 260 },
-    { frame: 'idle', durationMs: 2740 },
+    { frame: 'chen-blink', durationMs: 160 },
+    { frame: 'idle', durationMs: 2340 },
+    { frame: 'jiang-blink', durationMs: 160 },
+    { frame: 'idle', durationMs: 2840 },
+    { frame: 'chen-stroke', durationMs: 380 },
+    { frame: 'idle', durationMs: 2820 },
     { frame: 'jiang-book-closed', durationMs: 1100 },
     { frame: 'idle', durationMs: 3600 },
   ],
@@ -33,6 +33,10 @@ const workLoops: Record<WorkScene, readonly WorkBeat[]> = {
 export function sceneForPet(id: string, paired: boolean): WorkScene {
   if (paired) return 'dual-jiangchen';
   return id === 'pet-a' ? 'solo-chen' : 'solo-jiang';
+}
+
+export function workBeats(scene: WorkScene): readonly WorkBeat[] {
+  return workLoops[scene];
 }
 
 export function workFrameAt(scene: WorkScene, elapsedMs: number): WorkFrame {

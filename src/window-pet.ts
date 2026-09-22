@@ -125,7 +125,7 @@ export class WindowPet {
     const togglePomodoro = (event: Event) => {
       event.preventDefault(); event.stopPropagation();
       const kind = this.widgetToggle.dataset.action;
-      if (this.widgetToggle.disabled || (kind !== 'pomodoro-pause' && kind !== 'pomodoro-resume')) return;
+      if (this.widgetToggle.disabled || !kind || !['pomodoro-start', 'pomodoro-pause', 'pomodoro-resume'].includes(kind)) return;
       this.widgetToggle.disabled = true;
       void this.dispatch({ kind }).catch(error => this.showError(error));
     };
@@ -236,11 +236,11 @@ export class WindowPet {
     this.widgetTime.textContent = view.time;
     this.widgetKeys.textContent = view.keys;
     this.widgetClicks.textContent = view.clicks;
-    this.widgetToggle.hidden = view.control === null;
+    this.widgetToggle.hidden = false;
     this.widgetToggle.disabled = view.controlDisabled;
-    this.widgetToggle.dataset.control = view.control ?? '';
-    this.widgetToggle.dataset.action = view.control === 'pause' ? 'pomodoro-pause' : view.control === 'resume' ? 'pomodoro-resume' : '';
-    const controlLabel = view.control === 'pause' ? '暂停番茄钟' : view.control === 'resume' ? '继续番茄钟' : '';
+    this.widgetToggle.dataset.control = view.control;
+    this.widgetToggle.dataset.action = view.control === 'pause' ? 'pomodoro-pause' : view.control === 'resume' ? 'pomodoro-resume' : 'pomodoro-start';
+    const controlLabel = view.control === 'pause' ? '暂停番茄钟' : view.control === 'resume' ? '继续番茄钟' : '开始番茄钟';
     this.widgetToggle.setAttribute('aria-label', controlLabel);
     this.widgetToggle.title = controlLabel;
     this.widget.hidden = false;
@@ -258,7 +258,7 @@ export class WindowPet {
       this.bubble.hidden = true; this.bubbleHeight = 0; this.bubbleWidth = 0; this.dialogueSpeaker = null;
       return;
     }
-    const text = `${line.speaker === 'system' ? '休息提醒' : petNames[line.speaker]}：${line.text}`;
+    const text = line.speaker === 'system' ? line.text : `${petNames[line.speaker]}：${line.text}`;
     this.dialogueSpeaker = line.speaker;
     const bubbleClass = line.speaker === 'system' ? 'reminder' : line.speaker === 'pet-a' ? 'chen' : 'jiang';
     if (this.bubbleText.textContent !== text || this.bubble.hidden || !this.bubble.classList.contains(bubbleClass)) {
@@ -415,7 +415,8 @@ export class WindowPet {
       const { width, height } = this.geometry();
       this.pet.style.setProperty('--pet-width', `${width}px`); this.pet.style.setProperty('--pet-size', `${height}px`);
       const bubbleOffset = this.paired && this.dialogueSpeaker !== null && this.dialogueSpeaker !== 'system' ? 42 : 0;
-      const measured = calculatePetLayout({ petWidth: width, petHeight: height, widgetWidth: this.widgetWidth, widgetHeight: this.widgetHeight, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, bubbleOffset, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
+      const content = this.contentGeometry();
+      const measured = calculatePetLayout({ petWidth: width, petHeight: height, visibleTopInset: height - content.height, widgetWidth: this.widgetWidth, widgetHeight: this.widgetHeight, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, bubbleOffset, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
       const { windowWidth, windowHeight, widgetTop, statusTop, bubbleTop, petTop: top } = measured;
       this.widget.style.top = `${widgetTop}px`;
       this.status.style.top = `${statusTop}px`;

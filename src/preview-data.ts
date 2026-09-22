@@ -46,7 +46,9 @@ export function createPreviewState(scenario: PreviewScenario, keys = 0, clicks =
       todayClicks: (scenario === 'capped' ? 720 : 320) + clicks },
     pair: null, stage: 1,
     settings: { focusMinutes: 25, breakMinutes: 5, longBreakMinutes: 15, autoNext: false,
-      longBreakEnabled: true, lunchEnabled: true, nightEnabled: true, inputEnabled: true, bubblesEnabled: true },
+      longBreakEnabled: true, lunchEnabled: true, nightEnabled: true,
+      lunchStartMinutes: 750, lunchEndMinutes: 840, nightStartMinutes: 1320, nightEndMinutes: 480,
+      inputEnabled: true, bubblesEnabled: true },
     pomodoro: { phase: 'idle', resumePhase: 'focus', remainingSeconds: 0, completedRounds: 0 },
     dialogue: null, sleepSlot: null, inputStatus, storageWarning: null, unlockedDialogues: [],
   };

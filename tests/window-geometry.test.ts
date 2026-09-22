@@ -75,7 +75,7 @@ test('system error text is short and measured above the pet', () => {
   assert.equal(userFacingPetError('stale-revision: refresh app state'), '状态已更新，请再试一次');
   assert.equal(userFacingPetError('double sleep is not unlocked'), '双人床尚未解锁');
   assert.equal(userFacingPetError('unexpected backend detail'), '操作未完成，请稍后再试');
-  const layout = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 180, bubbleHeight: 40, bubbleOffset: 0, statusWidth: 150, statusHeight: 24, gap: 8, padding: 16 });
+  const layout = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 180, bubbleHeight: 40, bubbleOffset: 0, statusWidth: 150, statusHeight: 24, gap: 8, padding: 16 });
   assert.equal(layout.statusTop < layout.bubbleTop && layout.bubbleTop < layout.petTop, true);
   assert.equal(layout.widgetTop < layout.statusTop, true);
   assert.deepEqual(layout, { windowWidth: 200, windowHeight: 300, widgetTop: 16, statusTop: 94, bubbleTop: 126, petTop: 174 });
@@ -83,12 +83,20 @@ test('system error text is short and measured above the pet', () => {
 });
 
 test('widget attaches to the pet only while temporary message space is absent', () => {
-  const attached = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  const attached = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
   assert.equal(attached.petTop, attached.widgetTop + 70);
   assert.equal(attached.windowHeight, 212);
-  const withDialogue = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 184, bubbleHeight: 80, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  const withDialogue = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 184, bubbleHeight: 80, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
   assert.equal(withDialogue.bubbleTop, 94);
   assert.equal(withDialogue.petTop, 182);
+});
+
+test('widget anchors to visible art while keeping the stable canvas envelope', () => {
+  const standing = calculatePetLayout({ petWidth: 100, petHeight: 145, visibleTopInset: 35, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  const sleeping = calculatePetLayout({ petWidth: 160, petHeight: 145, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  assert.equal(standing.petTop + 35, standing.widgetTop + 70);
+  assert.equal(sleeping.petTop, sleeping.widgetTop + 70);
+  assert.equal(standing.windowHeight, sleeping.windowHeight);
 });
 
 test('clampWindowPosition respects a work area with negative monitor coordinates', () => {

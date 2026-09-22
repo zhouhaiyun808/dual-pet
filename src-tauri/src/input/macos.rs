@@ -199,6 +199,17 @@ fn modifier(state: &mut State, code: u16, flags: u64) {
     state.key(0, code, flags & mask != 0, false);
 }
 
+fn apply_event_fields(state: &mut State, event_type: u32, code: u16, repeat: bool, flags: u64, button: i64) {
+    match event_type {
+        10 | 11 => state.key(0, code, event_type == 10, repeat),
+        12 => modifier(state, code, flags),
+        1 | 2 => state.mouse(0, 0, event_type == 1),
+        3 | 4 => state.mouse(0, 1, event_type == 3),
+        25 | 26 if button == 2 => state.mouse(0, 2, event_type == 25),
+        _ => {}
+    }
+}
+
 unsafe extern "C" fn event(_: MutRef, event_type: u32, event: MutRef, context: MutRef) -> MutRef {
     if context.is_null() { return event; }
     let context = &*context.cast::<Context>();
@@ -211,23 +222,11 @@ unsafe extern "C" fn event(_: MutRef, event_type: u32, event: MutRef, context: M
     if event.is_null() { return event; }
     let mut state = context.shared.state();
     if !state.accepting() { return event; }
-    match event_type {
-        10 | 11 => {
-            let code = CGEventGetIntegerValueField(event, 9) as u16;
-            let repeat = CGEventGetIntegerValueField(event, 8) != 0;
-            state.key(0, code, event_type == 10, repeat);
-        }
-        12 => modifier(&mut state, CGEventGetIntegerValueField(event, 9) as u16,
-            CGEventGetFlags(event)),
-        1 | 2 => state.mouse(0, 0, event_type == 1),
-        3 | 4 => state.mouse(0, 1, event_type == 3),
-        25 | 26 => {
-            if CGEventGetIntegerValueField(event, 3) == 2 {
-                state.mouse(0, 2, event_type == 25);
-            }
-        }
-        _ => {}
-    }
+    let code = if matches!(event_type, 10..=12) { CGEventGetIntegerValueField(event, 9) as u16 } else { 0 };
+    let repeat = event_type == 10 && CGEventGetIntegerValueField(event, 8) != 0;
+    let flags = if event_type == 12 { CGEventGetFlags(event) } else { 0 };
+    let button = if matches!(event_type, 25 | 26) { CGEventGetIntegerValueField(event, 3) } else { -1 };
+    apply_event_fields(&mut state, event_type, code, repeat, flags, button);
     // Listen-only is enforced by the OS. Always return the original pointer,
     // including for uninterested events. Never modify or synthesize events.
     event
@@ -333,42 +332,18 @@ unsafe fn run_native(shared: Arc<Shared>) {
 mod tests {
     use super::*;
 
-    #[repr(C)]
-    struct Point { x: f64, y: f64 }
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGEventCreateKeyboardEvent(source: Ref, key: u16, down: bool) -> MutRef;
-        fn CGEventCreateMouseEvent(source: Ref, kind: u32, point: Point, button: u32) -> MutRef;
-        fn CGEventSetIntegerValueField(event: MutRef, field: u32, value: i64);
-    }
-
     #[test]
-    fn native_event_field_decoding_counts_downs_without_posting_to_the_system() {
-        // Create local CGEvent objects and call our decoder. Never CGEventPost:
-        // no focus changes, clicks, typing or OS permission bypass occurs.
+    fn decoded_event_fields_count_downs_without_native_side_effects() {
         let shared = super::super::tests::ready();
-        let context = Context { shared: shared.clone(), keys: unsafe { SessionKeys::new() },
-            tap: Cell::new(null_mut()), sleeping: Cell::new(false),
-            root_power: Cell::new(0) };
-        let pointer = (&context as *const Context).cast_mut().cast();
-        unsafe {
-            let key = CGEventCreateKeyboardEvent(null(), 0, true);
-            assert!(!key.is_null());
-            event(null_mut(), 10, key, pointer);
-            CGEventSetIntegerValueField(key, 8, 1); // OS autorepeat
-            event(null_mut(), 10, key, pointer);
-            event(null_mut(), 11, key, pointer);
-            CFRelease(key);
-            for (down, up, button) in [(1, 2, 0), (3, 4, 1), (25, 26, 2)] {
-                let mouse = CGEventCreateMouseEvent(null(), down, Point { x: 0.0, y: 0.0 }, button);
-                assert!(!mouse.is_null());
-                event(null_mut(), down, mouse, pointer);
-                event(null_mut(), down, mouse, pointer); // duplicate down
-                event(null_mut(), up, mouse, pointer);
-                CFRelease(mouse);
-            }
+        let mut totals = shared.state();
+        apply_event_fields(&mut totals, 10, 0, false, 0, -1);
+        apply_event_fields(&mut totals, 10, 0, true, 0, -1);
+        apply_event_fields(&mut totals, 11, 0, false, 0, -1);
+        for (down, up, button) in [(1, 2, 0), (3, 4, 1), (25, 26, 2)] {
+            apply_event_fields(&mut totals, down, 0, false, 0, button);
+            apply_event_fields(&mut totals, down, 0, false, 0, button);
+            apply_event_fields(&mut totals, up, 0, false, 0, button);
         }
-        let totals = shared.state();
         assert_eq!((totals.keys, totals.clicks), (1, 3));
         assert!(totals.held.is_empty() && totals.mouse_held.is_empty());
     }

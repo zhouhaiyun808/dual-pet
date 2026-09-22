@@ -13,6 +13,8 @@ export interface PetRecord { present: boolean; activity: Activity; progress: Pro
 export interface Settings {
   focusMinutes: number; breakMinutes: number; longBreakMinutes: number;
   autoNext: boolean; longBreakEnabled: boolean; lunchEnabled: boolean; nightEnabled: boolean;
+  lunchStartMinutes: number; lunchEndMinutes: number;
+  nightStartMinutes: number; nightEndMinutes: number;
   inputEnabled: boolean; bubblesEnabled: boolean;
 }
 export interface Pomodoro {

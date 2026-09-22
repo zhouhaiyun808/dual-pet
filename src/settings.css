@@ -226,11 +226,14 @@ button:focus-visible, input:focus-visible, a:focus-visible, summary:focus-visibl
 .field { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .number-wrap { display: flex; align-items: center; gap: 7px; }
 input[type=number] { width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid var(--wood-soft); border-radius: 0; background: #fffdf5; color: var(--wood); box-shadow: inset 2px 2px 0 #e5d6bd; }
+input[type=time] { width:112px; padding:7px 8px; border:1px solid var(--wood-soft); border-radius:0; background:#fffdf5; color:var(--wood); box-shadow:inset 2px 2px 0 #e5d6bd; }
 .checks { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 14px; }
 .check { display: flex; align-items: center; gap: 8px; color: var(--wood); cursor: pointer; }
 input[type=checkbox] { accent-color: var(--jade); width: 16px; height: 16px; margin: 0; }
 .schedule-row { display: flex; gap: 16px; justify-content: space-between; align-items: center; padding: 11px 0; }
 .schedule-row + .schedule-row { border-top: 1px solid var(--wood-faint); }
+.time-range, .time-range label { display:flex; align-items:center; gap:7px; }
+.time-range label { color:var(--muted); font-size:12px; }
 
 .pet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .pet {

@@ -28,6 +28,7 @@ export function userFacingPetError(error: unknown): string {
 export interface PetLayoutInput {
   petWidth: number;
   petHeight: number;
+  visibleTopInset: number;
   widgetWidth: number;
   widgetHeight: number;
   bubbleWidth: number;
@@ -51,16 +52,22 @@ export interface PetLayout {
 /** Stack the optional widget, temporary bubble slot, and bottom-anchored pet. */
 export function calculatePetLayout(input: PetLayoutInput): PetLayout {
   const topPadding = Math.max(4, input.padding);
-  const widgetTop = topPadding;
-  let cursor = widgetTop + input.widgetHeight;
-  const statusTop = cursor + (input.widgetHeight && input.statusHeight ? input.gap : 0);
-  if (input.statusHeight) cursor = statusTop + input.statusHeight;
-  const bubbleTop = cursor + ((input.widgetHeight || input.statusHeight) && input.bubbleHeight ? input.gap : 0);
-  if (input.bubbleHeight) cursor = bubbleTop + input.bubbleHeight;
+  const baseWidgetTop = topPadding;
+  let cursor = baseWidgetTop + input.widgetHeight;
+  const baseStatusTop = cursor + (input.widgetHeight && input.statusHeight ? input.gap : 0);
+  if (input.statusHeight) cursor = baseStatusTop + input.statusHeight;
+  const baseBubbleTop = cursor + ((input.widgetHeight || input.statusHeight) && input.bubbleHeight ? input.gap : 0);
+  if (input.bubbleHeight) cursor = baseBubbleTop + input.bubbleHeight;
   // The widget tail attaches directly to the pet when there is no temporary
   // message. Dialogue and status bubbles keep the ordinary readable gap.
   const petGap = input.statusHeight || input.bubbleHeight ? input.gap : 0;
+  const visibleTopInset = Math.max(0, Math.min(input.petHeight, input.visibleTopInset));
   const petTop = Math.max(40, cursor + petGap);
+  // Keep the window and canvas envelope stable. Move only the upper stack into
+  // the current canvas' transparent top inset, attaching it to visible art.
+  const widgetTop = baseWidgetTop + visibleTopInset;
+  const statusTop = baseStatusTop + visibleTopInset;
+  const bubbleTop = baseBubbleTop + visibleTopInset;
   return {
     windowWidth: Math.max(input.petWidth + input.padding * 2, input.widgetWidth + input.padding, input.bubbleWidth + input.bubbleOffset * 2 + input.padding, input.statusWidth + input.padding),
     windowHeight: petTop + input.petHeight + input.padding,

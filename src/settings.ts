@@ -10,7 +10,7 @@ import { isBrowserPreview } from './preview-logic';
 import { connectPreview } from './preview-bridge';
 import { renderPixelTime } from './pixel-time';
 import { loadSprite } from './assets';
-import { savedEditIsCurrent, validateIntegerSetting } from './settings-save-logic';
+import { minutesToTime, savedEditIsCurrent, timeToMinutes, validateIntegerSetting } from './settings-save-logic';
 import './settings.css';
 
 const root = document.querySelector<HTMLElement>('#settings-app')!;
@@ -77,8 +77,8 @@ root.innerHTML = `
     <p id="draft-status" class="auto-save-status hint" role="status">设置读取中…</p>
     <section class="card" aria-labelledby="sleep-heading">
       <div class="section-head"><h2 id="sleep-heading" class="ornament-heading">按时安寝</h2><span id="sleep-status" class="hint">—</span></div>
-      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="lunchEnabled" disabled>午休</label><span>12:30 – 14:00</span></div>
-      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="nightEnabled" disabled>夜间睡眠</label><span>22:00 – 次日 08:00</span></div>
+      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="lunchEnabled" disabled>午休</label><span class="time-range"><label>开始 <input type="time" data-setting="lunchStartMinutes" aria-label="午休开始时间" disabled></label><span>至</span><label>结束 <input type="time" data-setting="lunchEndMinutes" aria-label="午休结束时间" disabled></label></span></div>
+      <div class="schedule-row"><label class="check"><input type="checkbox" data-setting="nightEnabled" disabled>夜间睡眠</label><span class="time-range"><label>开始 <input type="time" data-setting="nightStartMinutes" aria-label="夜间睡眠开始时间" disabled></label><span>至</span><label>结束 <input type="time" data-setting="nightEndMinutes" aria-label="夜间睡眠结束时间" disabled></label></span></div>
       <div class="schedule-row"><span class="hint">按电脑本地时间；醒来后手动继续专注。</span><button data-action="skip-sleep" disabled>跳过当前睡眠时段</button></div>
     </section>
     <section class="card" aria-labelledby="focus-settings-heading">
@@ -348,6 +348,7 @@ function render(): void {
     const key = control.dataset.setting as keyof Settings;
     if (!dirty.has(key)) {
       if (control.type === 'checkbox') control.checked = Boolean(state.settings[key]);
+      else if (control.type === 'time') control.value = minutesToTime(Number(state.settings[key]));
       else control.value = String(state.settings[key]);
     }
     control.disabled = busy;
@@ -402,7 +403,7 @@ function render(): void {
     element(`${id}-companion-presence`).textContent = pet.present ? '在场' : '离场';
     element(`${id}-companion-activity`).textContent = pet.present ? activities[pet.activity] : '暂停成长';
     element(`${id}-score`).textContent = p.personalGrowth.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
-    element(`${id}-target`).textContent = p.personalGrowth >= 4000 ? '第二档个人里程碑已达成' : `${target.toLocaleString()} 个人目标 · 还差 ${Math.max(0, Math.ceil(target - p.personalGrowth)).toLocaleString()}`;
+    element(`${id}-target`).textContent = p.personalGrowth >= 4000 ? '第二档个人里程碑已达成 · 单人台词已全部解锁' : `${target.toLocaleString()} 个人目标（解锁更多单人台词）· 还差 ${Math.max(0, Math.ceil(target - p.personalGrowth)).toLocaleString()}`;
     const bar = element<HTMLProgressElement>(`${id}-progress`);
     bar.max = target;
     bar.value = Math.min(p.personalGrowth, target);
@@ -440,12 +441,12 @@ function renderCatalogue(state: AppSnapshot): void {
   catalogueKey = key;
   const collected = new Set(state.unlockedDialogues);
   const count = dialogueCatalogue.filter(scene => collected.has(scene.id)).length;
-  element('collection-count').textContent = `已收集 ${count} / ${dialogueCatalogue.length} 段已核实短句 · 未收集条目仅显示出处`;
+  element('collection-count').textContent = `已收集 ${count} / ${dialogueCatalogue.length} 段台词（含人物改编） · 单人台词按成长 0 / 1,000 / 4,000 解锁，切换站立或工作时相遇`;
   const nodes = dialogueCatalogue.map(scene => {
     const details = document.createElement('details');
     const summary = document.createElement('summary');
     const unlocked = collected.has(scene.id);
-    summary.textContent = `${unlocked ? '已收集' : '待相遇'} · ${scene.title}`;
+    summary.textContent = `${unlocked ? '已收集' : '待相遇'} · ${scene.title}${scene.trigger === 'solo-growth' ? ` · ${petNames[scene.lines[0].speaker as PetId]}成长 ${scene.minimumGrowth}` : ' · 双人对话'}`;
     details.append(summary);
     if (unlocked) {
       for (const line of scene.lines) {
@@ -455,20 +456,6 @@ function renderCatalogue(state: AppSnapshot): void {
         details.append(p);
       }
     }
-    for (const text of [scene.originalContext, scene.editorialNote]) {
-      const p = document.createElement('p');
-      p.className = 'muted';
-      p.textContent = text;
-      details.append(p);
-    }
-    const source = document.createElement('p');
-    const a = document.createElement('a');
-    a.href = scene.sourceUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.textContent = `${scene.sourceTitle} ↗`;
-    source.append(a);
-    details.append(source);
     return details;
   });
   const unknown = [...collected].filter(id => !dialogueCatalogue.some(scene => scene.id === id));
@@ -481,6 +468,7 @@ function renderCatalogue(state: AppSnapshot): void {
 }
 
 function validationMessage(control: HTMLInputElement): string {
+  if (control.type === 'time') return timeToMinutes(control.value) === null ? '请选择有效时间。' : '';
   if (control.type !== 'number') return '';
   return validateIntegerSetting(control.valueAsNumber, Number(control.min), Number(control.max));
 }
@@ -517,7 +505,10 @@ async function saveSettings(): Promise<void> {
   for (const control of controls) {
     const key = control.dataset.setting as keyof Settings;
     if (!dirty.has(key) || updateFieldError(control)) continue;
-    Object.assign(settings, { [key]: control.type === 'checkbox' ? control.checked : control.valueAsNumber });
+    const value = control.type === 'checkbox' ? control.checked
+      : control.type === 'time' ? timeToMinutes(control.value)
+      : control.valueAsNumber;
+    Object.assign(settings, { [key]: value });
     captured.set(key, editVersions.get(key) ?? 0);
   }
   if (!captured.size) { updateDraftStatus(); return; }
@@ -559,7 +550,7 @@ for (const control of controls) {
     scheduleSettingsSave(control.type === 'checkbox' ? 0 : 400);
   };
   control.addEventListener(control.type === 'checkbox' ? 'change' : 'input', edited);
-  if (control.type === 'number') control.addEventListener('blur', () => {
+  if (control.type === 'number' || control.type === 'time') control.addEventListener('blur', () => {
     updateFieldError(control);
     scheduleSettingsSave(0);
   });

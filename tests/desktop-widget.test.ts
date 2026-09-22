@@ -37,10 +37,14 @@ test('widget uses the configured idle time and device-level live totals', () => 
     sequence: 8, stateRevision: 4, inputStatus: 'listening',
     total: { day: '2026-09-22', todayKeys: 4232, todayClicks: 576 }, pets: {},
   } as InputCounts;
-  assert.deepEqual(desktopWidgetView(state, live), { phase: '待开始', time: '25:00', keys: '4,232', clicks: '576', control: null, controlDisabled: false });
+  assert.deepEqual(desktopWidgetView(state, live), { phase: '准备', time: '25:00', keys: '4,232', clicks: '576', control: 'start', controlDisabled: false });
   assert.deepEqual(desktopWidgetView(snapshot('focus'), live), { phase: '专注', time: '24:36', keys: '4,232', clicks: '576', control: 'pause', controlDisabled: false });
   assert.deepEqual(desktopWidgetView(snapshot('paused'), live), { phase: '暂停', time: '24:36', keys: '4,232', clicks: '576', control: 'resume', controlDisabled: false });
   const sleeping = snapshot('paused');
   sleeping.sleepSlot = 'night';
   assert.equal(desktopWidgetView(sleeping, live).controlDisabled, true);
+  const sleepingIdle = snapshot();
+  sleepingIdle.sleepSlot = 'night';
+  assert.deepEqual(desktopWidgetView(sleepingIdle, live).control, 'start');
+  assert.equal(desktopWidgetView(sleepingIdle, live).controlDisabled, true);
 });
