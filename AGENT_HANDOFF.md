@@ -1,5 +1,13 @@
 # Agent Handoff
 
+## 最新交接：2026-09-22 桌面挂件二轮与 Windows 验收债务
+
+- 本轮实现见 `DESKTOP_WIDGET_REFINEMENT_PLAN.md`：长台词泡泡改为中段可增高、四角／松竹／尾尖不拉伸；挂件关闭、暂停、继续为独立按钮；番茄钟使用本地 DSEG7 Classic Bold；陈绿玉、江蓝玉；无泡泡时挂件下降吸附，有泡泡时向上让位。
+- 正式资产在 `public/assets/ui/desktop-widget-frame*.png`、`widget-*.png` 和 `public/assets/fonts/DSEG7Classic-Bold.woff2`；确认稿在 `artifacts/widget-refinement-v2/`。DSEG 许可证见 `THIRD_PARTY_NOTICES.md` 与 `licenses/DSEG-LICENSE.txt`。
+- 本轮本地验证：前端完整 58 项、UI 纯逻辑 42 项通过；`npm run build`、`cargo check`、Rust state 46 项/store 10 项/runtime 4 项、Windows Raw Input 数据包 3 项通过。本地 macOS 完整 `input::` 组仍在报告 17 项通过后因已知原生 CGEvent 问题 SIGSEGV；macOS Actions 继续按既有边界排除原生 input 组。
+- Windows 的 Actions 成功只代表编译和打包成功。上一次可追溯的 Windows 完整人工基线是 2026-09-13，之后的多个提交没有 Windows 真机证据。本轮专用回归单是 `docs/V03_WINDOWS_WIDGET_ACCEPTANCE.md`，已纳入 Windows artifact；未按此文档完成前不得写“Windows 验收通过”。
+- GitHub 本轮提交、Actions 与 artifact 结果以 `main` 最新记录为准；接手时先确认 macOS x64/arm64 和 Windows x64 两个 workflow 均已到终态，不把“已触发”写成“已打包”。
+
 ## 最新交接：2026-09-17 UI 阶段已推送
 
 - GitHub `main` 已推送 `d91e5f5`；用户已确认看到 push。本条是推送后的本地交接补记，尚未单独提交。

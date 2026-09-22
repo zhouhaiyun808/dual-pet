@@ -47,7 +47,13 @@ app.innerHTML = `
     <section id="desktop-widget" class="desktop-widget" aria-label="桌面信息挂件" hidden>
       <button id="desktop-widget-close" class="desktop-widget-close" type="button" aria-label="关闭桌面信息挂件" title="关闭桌面信息挂件"></button>
       <div class="desktop-widget-content">
-        <div class="desktop-widget-timer"><span id="desktop-widget-phase"></span><span id="desktop-widget-time" class="desktop-widget-time"></span></div>
+        <div class="desktop-widget-timer">
+          <div class="desktop-widget-timer-group">
+            <button id="desktop-widget-toggle" class="desktop-widget-toggle" type="button" hidden></button>
+            <span id="desktop-widget-phase"></span>
+            <span id="desktop-widget-time" class="desktop-widget-time"></span>
+          </div>
+        </div>
         <div class="desktop-widget-inputs" aria-label="今日输入">
           <span class="desktop-widget-count"><img src="/assets/ui/keyboard-reference.png" alt="键盘"><strong id="desktop-widget-keys">0</strong></span>
           <span class="desktop-widget-divider" aria-hidden="true"></span>
@@ -59,7 +65,7 @@ app.innerHTML = `
       <canvas id="pet-image" aria-label="${profile.config.name}"></canvas>
     </div>
     <div id="pet-status" class="pet-status" hidden role="status"></div>
-    <div id="dialogue-bubble" class="dialogue-bubble" hidden aria-live="polite"></div>
+    <div id="dialogue-bubble" class="dialogue-bubble" hidden aria-live="polite"><span id="dialogue-text"></span></div>
   </div>
 `;
 

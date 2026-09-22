@@ -10,7 +10,6 @@ import { acceptPetMenuAction, calculatePetLayout, userFacingPetError, type PetMe
 import { controlSemanticsChanged, gestureFinishAction, isRoleDialogue, nextSinglePetActivity, normalizeDoubleClickDelay, shouldIgnoreSingleClick, shouldRunDelayedSingleClick, shouldSplitOnDoubleClick } from './click-logic';
 import { acceptCounts, type InputCounts } from './live-counts';
 import { desktopWidgetContext, desktopWidgetView, desktopWidgetVisible, setDesktopWidgetVisible } from './desktop-widget';
-import { renderPixelTime } from './pixel-time';
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 type Drag = {
   id: number;
@@ -70,6 +69,7 @@ export class WindowPet {
   private liveCounts: InputCounts | null = null;
   private widget = document.querySelector<HTMLElement>('#desktop-widget')!;
   private widgetClose = document.querySelector<HTMLButtonElement>('#desktop-widget-close')!;
+  private widgetToggle = document.querySelector<HTMLButtonElement>('#desktop-widget-toggle')!;
   private widgetPhase = document.querySelector<HTMLElement>('#desktop-widget-phase')!;
   private widgetTime = document.querySelector<HTMLElement>('#desktop-widget-time')!;
   private widgetKeys = document.querySelector<HTMLElement>('#desktop-widget-keys')!;
@@ -77,6 +77,7 @@ export class WindowPet {
   private widgetHeight = 0;
   private widgetWidth = 0;
   private bubble = document.querySelector<HTMLDivElement>('#dialogue-bubble')!;
+  private bubbleText = document.querySelector<HTMLSpanElement>('#dialogue-text')!;
   private status = document.querySelector<HTMLDivElement>('#pet-status')!;
   private bubbleHeight = 0;
   private bubbleWidth = 0;
@@ -121,11 +122,24 @@ export class WindowPet {
       this.renderWidget();
       if (this.ready) void this.layout().catch(console.error);
     };
-    for (const name of ['pointerdown', 'pointerup', 'dblclick']) this.widgetClose.addEventListener(name, stopWidgetGesture);
+    const togglePomodoro = (event: Event) => {
+      event.preventDefault(); event.stopPropagation();
+      const kind = this.widgetToggle.dataset.action;
+      if (this.widgetToggle.disabled || (kind !== 'pomodoro-pause' && kind !== 'pomodoro-resume')) return;
+      this.widgetToggle.disabled = true;
+      void this.dispatch({ kind }).catch(error => this.showError(error));
+    };
+    for (const button of [this.widgetClose, this.widgetToggle]) {
+      for (const name of ['pointerdown', 'pointerup', 'dblclick']) button.addEventListener(name, stopWidgetGesture);
+    }
     this.widgetClose.addEventListener('click', closeWidget);
+    this.widgetToggle.addEventListener('click', togglePomodoro);
     this.cleanups.push(() => {
-      for (const name of ['pointerdown', 'pointerup', 'dblclick']) this.widgetClose.removeEventListener(name, stopWidgetGesture);
+      for (const button of [this.widgetClose, this.widgetToggle]) {
+        for (const name of ['pointerdown', 'pointerup', 'dblclick']) button.removeEventListener(name, stopWidgetGesture);
+      }
       this.widgetClose.removeEventListener('click', closeWidget);
+      this.widgetToggle.removeEventListener('click', togglePomodoro);
     });
   }
   async init() {
@@ -217,10 +231,18 @@ export class WindowPet {
       this.widget.hidden = true; this.widgetHeight = 0; this.widgetWidth = 0; return;
     }
     const view = desktopWidgetView(this.snapshot, this.liveCounts);
+    this.widget.dataset.character = this.profile.config.id === 'pet-b' ? 'jiang' : 'chen';
     this.widgetPhase.textContent = view.phase;
-    renderPixelTime(this.widgetTime, view.time);
+    this.widgetTime.textContent = view.time;
     this.widgetKeys.textContent = view.keys;
     this.widgetClicks.textContent = view.clicks;
+    this.widgetToggle.hidden = view.control === null;
+    this.widgetToggle.disabled = view.controlDisabled;
+    this.widgetToggle.dataset.control = view.control ?? '';
+    this.widgetToggle.dataset.action = view.control === 'pause' ? 'pomodoro-pause' : view.control === 'resume' ? 'pomodoro-resume' : '';
+    const controlLabel = view.control === 'pause' ? '暂停番茄钟' : view.control === 'resume' ? '继续番茄钟' : '';
+    this.widgetToggle.setAttribute('aria-label', controlLabel);
+    this.widgetToggle.title = controlLabel;
     this.widget.hidden = false;
     const rect = this.widget.getBoundingClientRect();
     this.widgetHeight = Math.ceil(rect.height || 70);
@@ -239,9 +261,9 @@ export class WindowPet {
     const text = `${line.speaker === 'system' ? '休息提醒' : petNames[line.speaker]}：${line.text}`;
     this.dialogueSpeaker = line.speaker;
     const bubbleClass = line.speaker === 'system' ? 'reminder' : line.speaker === 'pet-a' ? 'chen' : 'jiang';
-    if (this.bubble.textContent !== text || this.bubble.hidden || !this.bubble.classList.contains(bubbleClass)) {
+    if (this.bubbleText.textContent !== text || this.bubble.hidden || !this.bubble.classList.contains(bubbleClass)) {
       this.bubble.className = `dialogue-bubble ${bubbleClass}`;
-      this.bubble.textContent = text; this.bubble.hidden = false;
+      this.bubbleText.textContent = text; this.bubble.hidden = false;
       const monitor = await currentMonitor();
       const maxWidth = monitor ? monitor.workArea.size.width / monitor.scaleFactor - 20 : 240;
       this.bubble.style.width = `${Math.max(80, Math.min(240, maxWidth))}px`;

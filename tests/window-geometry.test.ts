@@ -78,7 +78,17 @@ test('system error text is short and measured above the pet', () => {
   const layout = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 180, bubbleHeight: 40, bubbleOffset: 0, statusWidth: 150, statusHeight: 24, gap: 8, padding: 16 });
   assert.equal(layout.statusTop < layout.bubbleTop && layout.bubbleTop < layout.petTop, true);
   assert.equal(layout.widgetTop < layout.statusTop, true);
+  assert.deepEqual(layout, { windowWidth: 200, windowHeight: 300, widgetTop: 16, statusTop: 94, bubbleTop: 126, petTop: 174 });
   assert.equal(layout.windowHeight, layout.petTop + 110 + 16);
+});
+
+test('widget attaches to the pet only while temporary message space is absent', () => {
+  const attached = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  assert.equal(attached.petTop, attached.widgetTop + 70);
+  assert.equal(attached.windowHeight, 212);
+  const withDialogue = calculatePetLayout({ petWidth: 100, petHeight: 110, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 184, bubbleHeight: 80, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  assert.equal(withDialogue.bubbleTop, 94);
+  assert.equal(withDialogue.petTop, 182);
 });
 
 test('clampWindowPosition respects a work area with negative monitor coordinates', () => {

@@ -66,6 +66,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
           cp docs/V03_MACOS_DOWNLOAD.md "$package_dir/README.md"
           cp docs/V03_MANUAL_TESTS.md docs/V03_DESKTOP_WIDGET_MANUAL_TESTS.md "$package_dir/"
+          cp THIRD_PARTY_NOTICES.md licenses/DSEG-LICENSE.txt "$package_dir/"
           (
             cd "$package_dir"
             shasum -a 256 "$zip_name" > SHA256SUMS.txt

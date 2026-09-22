@@ -28,6 +28,8 @@ export interface DesktopWidgetView {
   time: string;
   keys: string;
   clicks: string;
+  control: 'pause' | 'resume' | null;
+  controlDisabled: boolean;
 }
 
 export function desktopWidgetView(snapshot: AppSnapshot, live: InputCounts | null): DesktopWidgetView {
@@ -41,5 +43,7 @@ export function desktopWidgetView(snapshot: AppSnapshot, live: InputCounts | nul
     time: `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`,
     keys: counts.todayKeys.toLocaleString('zh-CN'),
     clicks: counts.todayClicks.toLocaleString('zh-CN'),
+    control: phase === 'focus' || phase === 'break' ? 'pause' : phase === 'paused' ? 'resume' : null,
+    controlDisabled: phase === 'paused' && Boolean(snapshot.sleepSlot),
   };
 }

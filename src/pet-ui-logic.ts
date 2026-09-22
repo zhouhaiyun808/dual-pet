@@ -52,9 +52,15 @@ export interface PetLayout {
 export function calculatePetLayout(input: PetLayoutInput): PetLayout {
   const topPadding = Math.max(4, input.padding);
   const widgetTop = topPadding;
-  const statusTop = widgetTop + input.widgetHeight + (input.widgetHeight ? input.gap : 0);
-  const bubbleTop = statusTop + input.statusHeight + (input.statusHeight ? input.gap : 0);
-  const petTop = Math.max(40, bubbleTop + input.bubbleHeight + (input.bubbleHeight ? input.gap : 0));
+  let cursor = widgetTop + input.widgetHeight;
+  const statusTop = cursor + (input.widgetHeight && input.statusHeight ? input.gap : 0);
+  if (input.statusHeight) cursor = statusTop + input.statusHeight;
+  const bubbleTop = cursor + ((input.widgetHeight || input.statusHeight) && input.bubbleHeight ? input.gap : 0);
+  if (input.bubbleHeight) cursor = bubbleTop + input.bubbleHeight;
+  // The widget tail attaches directly to the pet when there is no temporary
+  // message. Dialogue and status bubbles keep the ordinary readable gap.
+  const petGap = input.statusHeight || input.bubbleHeight ? input.gap : 0;
+  const petTop = Math.max(40, cursor + petGap);
   return {
     windowWidth: Math.max(input.petWidth + input.padding * 2, input.widgetWidth + input.padding, input.bubbleWidth + input.bubbleOffset * 2 + input.padding, input.statusWidth + input.padding),
     windowHeight: petTop + input.petHeight + input.padding,

@@ -52,6 +52,8 @@ const native = {
       if(action.kind==='split') {state.pair=null;owner=null;windows.get(id==='pet-a'?'pet-b':'pet-a').visible=true;}
       if(action.kind==='pair-sleep-toggle' && state.pair) state.pair.mode=state.pair.mode==='double-sleep'?'kiss':'double-sleep';
       if(action.kind==='pair-cycle' && state.pair) state.pair.mode=state.pair.mode==='shared-work'?'double-sleep':state.pair.mode==='double-sleep'?'kiss':'shared-work';
+      if(action.kind==='pomodoro-pause') {state.pomodoro.resumePhase=state.pomodoro.phase;state.pomodoro.phase='paused';}
+      if(action.kind==='pomodoro-resume') state.pomodoro.phase=state.pomodoro.resumePhase;
       state.revision++; return structuredClone(state);
     }
     if (command === 'set_sleeping') sleeping.set(active.label,args.sleeping);
@@ -89,7 +91,7 @@ function element() {
     addEventListener(name,fn) {handlers.set(name,fn);}, removeEventListener(name){handlers.delete(name);},
     setPointerCapture(){}, hasPointerCapture(){return false;}, releasePointerCapture(){},
     async fire(name, extra={}) {
-      const event={type:name,button:0,pointerId:1,screenX:100,screenY:100,defaultPrevented:false,preventDefault(){this.defaultPrevented=true;},...extra};
+      const event={type:name,button:0,pointerId:1,screenX:100,screenY:100,defaultPrevented:false,propagationStopped:false,preventDefault(){this.defaultPrevented=true;},stopPropagation(){this.propagationStopped=true;},...extra};
       await handlers.get(name)?.(event); return event;
     },
   };
@@ -109,12 +111,13 @@ async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
     };
   }
   active=make('pet-a',dpi); windows.set('pet-a',active); windows.set('pet-b',make('pet-b',guestDpi)); cursor={x:200,y:200};
-  const petElement=element(), widget={...element(),hidden:true,getBoundingClientRect:()=>({width:184,height:70})}, widgetClose=element();
+  const petElement=element(), widget={...element(),hidden:true,getBoundingClientRect:()=>({width:184,height:70})}, widgetClose=element(), widgetToggle=element();
   const widgetPhase=element(), widgetTime=element(), widgetKeys=element(), widgetClicks=element();
-  const bubble={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, status={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, doc=element();
+  const bubbleText=element();
+  const bubble={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:240,height:Math.max(80, 50 + Math.ceil((bubbleText.textContent?.length ?? 0) / 18) * 19)})}, status={...element(),hidden:true,textContent:'',getBoundingClientRect:()=>({width:100,height:30})}, doc=element();
   const context=new Proxy({}, {get:()=>()=>{},set:()=>true});
   const canvas={width:0,height:0,getContext:()=>context};
-  const elements={'#pet-image':canvas,'#dialogue-bubble':bubble,'#pet-status':status,'#desktop-widget':widget,'#desktop-widget-close':widgetClose,'#desktop-widget-phase':widgetPhase,'#desktop-widget-time':widgetTime,'#desktop-widget-keys':widgetKeys,'#desktop-widget-clicks':widgetClicks,'#pet':petElement};
+  const elements={'#pet-image':canvas,'#dialogue-bubble':bubble,'#dialogue-text':bubbleText,'#pet-status':status,'#desktop-widget':widget,'#desktop-widget-close':widgetClose,'#desktop-widget-toggle':widgetToggle,'#desktop-widget-phase':widgetPhase,'#desktop-widget-time':widgetTime,'#desktop-widget-keys':widgetKeys,'#desktop-widget-clicks':widgetClicks,'#pet':petElement};
   doc.querySelector=selector=>elements[selector]??petElement;
   globalThis.document=doc;
   clearedSelections=0;
@@ -124,7 +127,7 @@ async function setup(dpi=2, guestDpi=2, platform='Macintosh') {
   globalThis.localStorage={getItem:key=>stored.get(key)??null,setItem(key,value){stored.set(key,value);}};
   const profile={config:{id:'pet-a',partnerId:'pet-b',baseSize:80,frameMs:100},scale:1,minScale:.55,maxScale:4};
   const pet=new WindowPet(profile); await pet.init();
-  return {pet, petElement,canvas,doc,profile,win:active};
+  return {pet, petElement,canvas,doc,profile,win:active,widget,widgetClose,widgetToggle,widgetPhase,widgetTime,bubble,bubbleText};
 }
 const settle = async () => {for(let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve));};
 
@@ -133,6 +136,29 @@ test('static canvas repaints after Retina scale changes without an animation', a
   assert.equal(canvas.width,232);
   window.devicePixelRatio=1; pet.paint(100);
   assert.equal(canvas.width,116); pet.destroy();
+});
+test('widget pause and resume controls dispatch without leaking into pet gestures', async () => {
+  const {pet,widgetToggle}=await setup();
+  state.pomodoro.phase='focus';state.pomodoro.remainingSeconds=1200;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widgetToggle.dataset.control,'pause');
+  await widgetToggle.fire('pointerdown');await widgetToggle.fire('click');await settle();
+  assert.equal(state.pomodoro.phase,'paused');
+  assert.equal(pet.pointer,null);
+  assert.equal(widgetToggle.dataset.control,'resume');
+  await widgetToggle.fire('click');await settle();
+  assert.equal(state.pomodoro.phase,'focus');
+  pet.destroy();
+});
+
+test('long dialogue uses measured content height and keeps text in its child node', async () => {
+  const {pet,bubble,bubbleText}=await setup();
+  state.dialogue={kind:'manual',id:99,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'这是一段足够长的台词，用来验证中间宣纸区域会随文字高度增长，而不会把正文裁掉。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(bubble.hidden,false);
+  assert.match(bubbleText.textContent,/不会把正文裁掉/);
+  assert.equal(pet.bubbleHeight>80,true);
+  pet.destroy();
 });
 test('Control-click opens menu but never begins dragging or toggles sleep', async () => {
   const {pet,petElement,doc}=await setup();
