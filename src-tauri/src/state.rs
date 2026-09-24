@@ -26,7 +26,10 @@ pub const KISS_THRESHOLD: f64 = 1000.0;
 pub const BED_THRESHOLD: f64 = 4000.0;
 const MAX_TICK_GAP: i64 = 5;
 const COOLDOWN: f64 = 60.0;
-const MAX_DIALOGUE_CHARS: usize = 28;
+// The fixed 188px text lane fits 14 full-width glyphs at 13px.
+// Reserve space for the speaker name and colon on every page.
+const MAX_DIALOGUE_CHARS_A: usize = 10;
+const MAX_DIALOGUE_CHARS_B: usize = 11;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PetId {
@@ -999,7 +1002,7 @@ impl Core {
     fn break_reminder(&mut self) {
         if self.state.settings.bubbles_enabled && !self.none_present() {
             self.start_dialogue("break-reminder", vec![DialogueLine {
-                speaker: Speaker::System, text: "休息一下，起来动动吧。".into(),
+                speaker: Speaker::System, text: "休息一下，起来动动吧".into(),
             }]);
         }
     }
@@ -1125,17 +1128,18 @@ fn dialogue_line_duration(kind: &str, text: &str) -> f64 {
     if kind == "break-reminder" { 10.0 } else { line_duration(text) }
 }
 
-fn split_dialogue_text(text: &str) -> Vec<String> {
+fn split_dialogue_text(text: &str, limit: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= MAX_DIALOGUE_CHARS { return vec![text.into()]; }
+    if chars.len() <= limit { return vec![text.into()]; }
     let mut parts = Vec::new();
     let mut start = 0;
-    while chars.len() - start > MAX_DIALOGUE_CHARS {
-        let end = (start + MAX_DIALOGUE_CHARS).min(chars.len());
+    while chars.len() - start > limit {
+        let end = start + limit;
         let window = &chars[start..end];
         let strong = window.iter().rposition(|c| matches!(c, '。' | '！' | '？' | '；' | '…'));
         let weak = window.iter().rposition(|c| matches!(c, '，' | '、' | '：'));
-        let split = start + strong.or(weak).map_or(MAX_DIALOGUE_CHARS, |index| index + 1);
+        let boundary = strong.or(weak).map(|index| index + 1).filter(|index| *index >= limit / 2);
+        let split = start + boundary.unwrap_or(limit);
         parts.push(chars[start..split].iter().collect());
         start = split;
     }
@@ -1145,7 +1149,9 @@ fn split_dialogue_text(text: &str) -> Vec<String> {
 
 fn split_dialogue_lines(lines: Vec<DialogueLine>) -> Vec<DialogueLine> {
     lines.into_iter().flat_map(|line| {
-        split_dialogue_text(&line.text).into_iter().map(move |text| DialogueLine { speaker: line.speaker, text })
+        let limit = match line.speaker { Speaker::A => MAX_DIALOGUE_CHARS_A,
+            Speaker::B => MAX_DIALOGUE_CHARS_B, Speaker::System => usize::MAX };
+        split_dialogue_text(&line.text, limit).into_iter().map(move |text| DialogueLine { speaker: line.speaker, text })
     }).collect()
 }
 
@@ -1320,7 +1326,7 @@ mod tests {
         assert_eq!(c.snapshot(), before);
         assert!(c.dispatch(action("pair-cycle", Some(PetId::A)), None, c.last_clock.clone()).is_err());
         assert_eq!(c.snapshot(), before);
-        seconds(&mut c, 10);
+        seconds(&mut c, 30);
         command(&mut c, action("split", None));
         assert!(c.state.pair.is_none());
     }
@@ -1682,8 +1688,8 @@ mod tests {
             assert_eq!(c.state.unlocked_dialogues, [kind]);
             assert!(catalogue.contains(&format!("id: '{kind}'")));
             let d = c.state.dialogue.as_ref().unwrap();
-            for line in &d.lines { assert!(catalogue.contains(&format!("text: '{}'", line.text))); }
-            assert_eq!(d.lines.len(), if kind == "face-dialogue" { 2 } else { 3 });
+            assert!(d.lines.iter().all(|line| catalogue.contains(&line.text)));
+            assert!(d.lines.len() >= if kind == "face-dialogue" { 2 } else { 3 });
         }
         assert_eq!(line_duration("短句"), 3.0); assert_eq!(line_duration(&"字".repeat(100)), 7.0);
     }
@@ -1691,13 +1697,16 @@ mod tests {
     #[test]
     fn long_dialogue_is_split_without_loss_and_keeps_the_speaker() {
         let text = "甲乙丙丁戊己庚辛壬癸，前半仍在继续。后半也要完整保留，而且不能漏字不能重字！最后收尾。";
-        let parts = split_dialogue_text(text);
+        let parts = split_dialogue_text(text, MAX_DIALOGUE_CHARS_B);
         assert!(parts.len() >= 2);
         assert_eq!(parts.concat(), text);
-        assert!(parts.iter().all(|part| part.chars().count() <= MAX_DIALOGUE_CHARS));
+        assert!(parts.iter().all(|part| part.chars().count() <= MAX_DIALOGUE_CHARS_B));
         let lines = split_dialogue_lines(vec![DialogueLine { speaker: Speaker::B, text: text.into() }]);
         assert_eq!(lines.iter().map(|line| line.text.as_str()).collect::<String>(), text);
         assert!(lines.iter().all(|line| line.speaker == Speaker::B));
+        assert_eq!(split_dialogue_lines(vec![DialogueLine { speaker: Speaker::A,
+            text: "早备好了，就等江大侠点头。".into() }]).iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+            ["早备好了，", "就等江大侠点头。"]);
     }
 
     #[test]
@@ -1706,7 +1715,7 @@ mod tests {
         c.break_reminder();
         let line = &c.state.dialogue.as_ref().unwrap().lines[0];
         assert_eq!(line.speaker, Speaker::System);
-        assert_eq!(line.text, "休息一下，起来动动吧。");
+        assert_eq!(line.text, "休息一下，起来动动吧");
         assert_eq!(c.state.dialogue.as_ref().unwrap().remaining_seconds, 10.0);
     }
 
@@ -1723,7 +1732,10 @@ mod tests {
                 let d = c.state.dialogue.as_ref().unwrap();
                 assert_eq!(d.kind, kind);
                 assert!(d.lines.len() >= 2);
-                assert!(d.lines.iter().all(|line| line.text.chars().count() <= MAX_DIALOGUE_CHARS));
+                assert!(d.lines.iter().all(|line| line.text.chars().count() <= match line.speaker {
+                    Speaker::A => MAX_DIALOGUE_CHARS_A, Speaker::B => MAX_DIALOGUE_CHARS_B,
+                    Speaker::System => usize::MAX,
+                }));
                 assert!(d.lines.iter().any(|line| line.speaker == Speaker::A));
                 assert!(d.lines.iter().any(|line| line.speaker == Speaker::B));
             }
@@ -1748,12 +1760,13 @@ mod tests {
                     assert!(c.start_solo_dialogue(pet));
                     let d = c.state.dialogue.as_ref().unwrap();
                     assert_eq!(d.kind, "solo-growth");
-                    assert_eq!(d.lines.len(), 1);
-                    let speaker = if pet == PetId::A { "a" } else { "b" };
-                    assert!(catalogue.contains(&format!("speaker: 'pet-{speaker}', text: '{}'", d.lines[0].text)));
+                    assert!(d.lines.iter().all(|line| line.speaker == if pet == PetId::A { Speaker::A } else { Speaker::B }));
+                    assert!(d.lines.iter().all(|line| line.text.chars().count() <= if pet == PetId::A {
+                        MAX_DIALOGUE_CHARS_A } else { MAX_DIALOGUE_CHARS_B }));
+                    assert!(catalogue.contains(&d.lines.iter().map(|line| line.text.as_str()).collect::<String>()));
                     assert!(catalogue.contains(&format!("id: '{}'", c.state.unlocked_dialogues.last().unwrap())));
                     assert!(!c.start_solo_dialogue(pet));
-                    c.advance_dialogue(8.0);
+                    c.advance_dialogue(120.0);
                     assert!(!c.start_solo_dialogue(pet)); // separate solo cooldown
                 }
                 assert_eq!(c.state.unlocked_dialogues.len(), count);

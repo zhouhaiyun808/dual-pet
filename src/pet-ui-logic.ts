@@ -49,6 +49,15 @@ export interface PetLayout {
   petTop: number;
 }
 
+export function suppressDesktopWidgetForDialogue(dialogueVisible: boolean): boolean {
+  return dialogueVisible;
+}
+
+/** Put a stable source-canvas anchor at the center of the drawing envelope. */
+export function anchoredDrawX(canvasWidth: number, cropLeft: number, anchorSourceX: number, scale: number): number {
+  return Math.round(canvasWidth / 2 - (anchorSourceX - cropLeft) * scale);
+}
+
 /** Stack the optional widget, temporary bubble slot, and bottom-anchored pet. */
 export function calculatePetLayout(input: PetLayoutInput): PetLayout {
   const topPadding = Math.max(4, input.padding);

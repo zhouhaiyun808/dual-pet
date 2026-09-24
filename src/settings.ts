@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { currentMonitor, getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import type { AppAction, AppSnapshot, PetId, Settings } from './app-state';
 import { petNames } from './app-state';
-import { dialogueCatalogue } from './dialogue-catalog';
+import { collectionStatus, dialogueCatalogue } from './dialogue-catalog';
 import { acceptCounts, displayedCounts, displayedTotalCounts, inputStatusText, type InputCounts } from './live-counts';
 import { dailyEarningsBreakdown, formatDailyEarnings, formatDailySourceEarnings } from './growth-details';
 import { isBrowserPreview } from './preview-logic';
@@ -446,7 +446,7 @@ function renderCatalogue(state: AppSnapshot): void {
     const details = document.createElement('details');
     const summary = document.createElement('summary');
     const unlocked = collected.has(scene.id);
-    summary.textContent = `${unlocked ? '已收集' : '待相遇'} · ${scene.title}${scene.trigger === 'solo-growth' ? ` · ${petNames[scene.lines[0].speaker as PetId]}成长 ${scene.minimumGrowth}` : ' · 双人对话'}`;
+    summary.textContent = `${collectionStatus(scene, unlocked)} · ${scene.title}${scene.trigger === 'solo-growth' ? ` · ${petNames[scene.lines[0].speaker as PetId]}成长 ${scene.minimumGrowth}` : ' · 双人对话'}`;
     details.append(summary);
     if (unlocked) {
       for (const line of scene.lines) {

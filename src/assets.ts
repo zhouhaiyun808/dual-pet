@@ -89,6 +89,13 @@ export async function loadBoundedSprite(url: string): Promise<Sprite> {
 export type WorkScene = 'solo-chen' | 'solo-jiang' | 'dual-jiangchen';
 export type WorkFrame = 'idle' | 'chen-blink' | 'chen-stroke' | 'jiang-blink' | 'jiang-book-closed';
 
+// Source-canvas X coordinates measured on the approved standing and solo-work
+// idle frames. Every animation frame in a scene shares its reference anchor.
+export const singleAttachmentAnchors = {
+  'pet-a': { standing: 46, working: 512 },
+  'pet-b': { standing: 46, working: 512 },
+} as const;
+
 const workFrameFiles: Record<WorkScene, Partial<Record<WorkFrame, string>>> = {
   'solo-chen': {
     idle: '00-idle.png',

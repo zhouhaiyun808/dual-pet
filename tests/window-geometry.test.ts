@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bottomRightPosition, clampWindowPosition, cssDeltaToPhysical, normalizeRect, intersects } from '../src/window-geometry.ts';
-import { acceptPetMenuAction, calculatePetLayout, userFacingPetError } from '../src/pet-ui-logic.ts';
+import { acceptPetMenuAction, anchoredDrawX, calculatePetLayout, suppressDesktopWidgetForDialogue, userFacingPetError } from '../src/pet-ui-logic.ts';
 import { DOUBLE_CLICK_TOLERANCE_MS, FALLBACK_DOUBLE_CLICK_INTERVAL_MS, controlSemanticsChanged, gestureFinishAction, isRoleDialogue, nextSinglePetActivity, normalizeDoubleClickDelay, pairModeIsStanding, shouldIgnoreSingleClick, shouldRunDelayedSingleClick, shouldSplitOnDoubleClick } from '../src/click-logic.ts';
 
 test('click rules keep single and double clicks mutually exclusive', () => {
@@ -82,13 +82,25 @@ test('system error text is short and measured above the pet', () => {
   assert.equal(layout.windowHeight, layout.petTop + 110 + 16);
 });
 
-test('widget attaches to the pet only while temporary message space is absent', () => {
+test('dialogue suppression removes the widget from production layout', () => {
+  assert.equal(suppressDesktopWidgetForDialogue(false), false);
+  assert.equal(suppressDesktopWidgetForDialogue(true), true);
   const attached = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 0, bubbleHeight: 0, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
   assert.equal(attached.petTop, attached.widgetTop + 70);
   assert.equal(attached.windowHeight, 212);
-  const withDialogue = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 184, widgetHeight: 70, bubbleWidth: 184, bubbleHeight: 80, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
-  assert.equal(withDialogue.bubbleTop, 94);
-  assert.equal(withDialogue.petTop, 182);
+  const withDialogue = calculatePetLayout({ petWidth: 100, petHeight: 110, visibleTopInset: 0, widgetWidth: 0, widgetHeight: 0, bubbleWidth: 184, bubbleHeight: 80, bubbleOffset: 0, statusWidth: 0, statusHeight: 0, gap: 8, padding: 16 });
+  assert.equal(withDialogue.bubbleTop, 16);
+  assert.equal(withDialogue.petTop, 104);
+  assert.equal(withDialogue.windowHeight, 230);
+});
+
+test('single-pet attachment stays at canvas center across frame crops and scales', () => {
+  for (const canvasWidth of [116, 184]) for (const scale of [0.4, 1.2]) {
+    for (const cropLeft of [0, 5, 11]) {
+      const x = anchoredDrawX(canvasWidth, cropLeft, 46, scale);
+      assert.ok(Math.abs(x + (46 - cropLeft) * scale - canvasWidth / 2) <= .5);
+    }
+  }
 });
 
 test('widget anchors to visible art while keeping the stable canvas envelope', () => {

@@ -19,7 +19,8 @@ registerHooks({
     if (url.startsWith('mock:')) {
       const name = url.slice(5);
       const keys = {window: ['getCurrentWindow','Window','LogicalSize','LogicalPosition','PhysicalPosition','currentMonitor','primaryMonitor','availableMonitors','cursorPosition'], event:['listen'], core:['invoke'], assets:['getBedFrame','getStaticFrame','getWalkFrames','getWorkFrameNames','getWorkFrameUrl','loadSprite','loadWorkFrameSprite']}[name];
-      return {format:'module', shortCircuit:true, source:keys.map(key => `export const ${key} = (...args) => globalThis.__petAdapters.${key}(...args);`).join('\n').replace(/export const (Window|LogicalSize|LogicalPosition|PhysicalPosition) = [^\n]+/g, (_, key) => `export const ${key} = globalThis.__petAdapters.${key};`)};
+      const source=keys.map(key => `export const ${key} = (...args) => globalThis.__petAdapters.${key}(...args);`).join('\n').replace(/export const (Window|LogicalSize|LogicalPosition|PhysicalPosition) = [^\n]+/g, (_, key) => `export const ${key} = globalThis.__petAdapters.${key};`);
+      return {format:'module', shortCircuit:true, source:name==='assets'?`${source}\nexport const singleAttachmentAnchors = {'pet-a':{standing:46,working:512},'pet-b':{standing:46,working:512}};`:source};
     }
     if (url.endsWith('.ts')) return {format:'module', shortCircuit:true, source:ts.transpileModule(readFileSync(new URL(url),'utf8'), {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText};
     return next(url, context);
@@ -164,12 +165,221 @@ test('idle widget starts focus directly and uses the shared play-button slot', a
 });
 
 test('dialogue uses the fixed measured bubble and system reminders omit a prefix', async () => {
-  const {pet,bubble,bubbleText}=await setup();
-  state.dialogue={kind:'break-reminder',id:99,index:0,remainingSeconds:8,lines:[{speaker:'system',text:'休息一下，起来动动吧。'}]};state.revision++;
+  const {pet,bubble,bubbleText,widget}=await setup();
+  display.workArea.size.width=160;
+  state.dialogue={kind:'break-reminder',id:99,index:0,remainingSeconds:8,lines:[{speaker:'system',text:'休息一下，起来动动吧'}]};state.revision++;
   pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
   assert.equal(bubble.hidden,false);
-  assert.equal(bubbleText.textContent,'休息一下，起来动动吧。');
+  assert.equal(bubbleText.textContent,'休息一下，起来动动吧');
+  assert.equal(bubble.style.width,undefined);
+  assert.equal(pet.bubbleWidth,240);
   assert.equal(pet.bubbleHeight,108);
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  state.dialogue={kind:'break-reminder',id:100,index:0,remainingSeconds:8,lines:[{speaker:'system',text:'这是一段更长的休息提醒文字，但不能改变泡泡的固定外框几何。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(pet.bubbleWidth,240);
+  assert.equal(pet.bubbleHeight,108);
+  state.dialogue={kind:'shared-work',id:101,index:0,remainingSeconds:3,lines:[
+    {speaker:'pet-a',text:'早备好了，'},{speaker:'pet-a',text:'就等江大侠点头。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(bubbleText.textContent,'陈子奚：早备好了，');
+  state.dialogue.index=1;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(bubbleText.textContent,'陈子奚：就等江大侠点头。');
+  pet.destroy();
+});
+
+test('dialogue CSS uses fixed, proportional image layers and separate text areas', () => {
+  const css=readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
+  const bubble=css.match(/\.dialogue-bubble \{[^}]+\}/)?.[0]??'';
+  const image=css.match(/\.dialogue-bubble::before \{[^}]+\}/)?.[0]??'';
+  const textLane=css.match(/\.dialogue-bubble > span \{[^}]+\}/)?.[0]??'';
+  const reminder=css.match(/\.dialogue-bubble\.reminder > span \{[^}]+\}/)?.[0]??'';
+  assert.match(bubble,/width:240px; height:108px/);
+  assert.match(image,/width:240px; height:80px; background-position:center; background-size:240px 80px/);
+  assert.equal(240/80,2172/724);
+  assert.doesNotMatch(css,/border-image|background-size:100% 100%/);
+  assert.match(bubble,/font:13px/);
+  assert.match(textLane,/left:26px; top:14px/);
+  assert.match(textLane,/width:188px; height:80px/);
+  assert.match(textLane,/justify-content:center/);
+  assert.match(textLane,/white-space:nowrap/);
+  assert.match(reminder,/left:35px; top:32px; width:170px/);
+  assert.match(reminder,/text-align:center/);
+  for(const name of ['dialogue-chen','dialogue-jiang','rest-reminder']) assert.match(css,new RegExp(`${name}\\.png`));
+});
+
+test('dialogue temporarily suppresses the widget and restores only persisted visibility', async () => {
+  const {pet,widget}=await setup();
+  assert.equal(widget.hidden,false);
+  state.dialogue={kind:'solo-growth',id:1,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'你好。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  assert.equal(localStorage.getItem('desktop-widget-visible:pet-a'),null);
+  state.dialogue=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(pet.widgetHeight,70);
+
+  await pet.menuAction('widget-hide');
+  assert.equal(localStorage.getItem('desktop-widget-visible:pet-a'),'false');
+  state.dialogue={kind:'solo-growth',id:2,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'再次见面。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  state.dialogue=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  pet.destroy();
+});
+
+test('hiding the widget during dialogue prevents it from reviving afterward', async () => {
+  const {pet,widget}=await setup();
+  state.dialogue={kind:'solo-growth',id:1,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'你好。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  await pet.menuAction('widget-hide');
+  assert.equal(localStorage.getItem('desktop-widget-visible:pet-a'),'false');
+  state.dialogue=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  pet.destroy();
+});
+
+test('an error clears dialogue suppression and restores the persisted widget', async () => {
+  const {pet,bubble,widget}=await setup();
+  state.dialogue={kind:'solo-growth',id:1,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'你好。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  pet.showError('unexpected backend detail');
+  assert.equal(bubble.hidden,true);
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(pet.widgetHeight,70);
+  pet.destroy();
+});
+
+test('pairing without dialogue inherits the visible single widget without a hidden frame', async () => {
+  const {pet,widget}=await setup();
+  localStorage.setItem('desktop-widget-visible:paired','false');
+  const visibility=[];
+  let hidden=widget.hidden;
+  Object.defineProperty(widget,'hidden',{get:()=>hidden,set:value=>{hidden=value;visibility.push(value);}});
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(pet.widgetHeight,70);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'true');
+  assert.deepEqual(visibility,[false]);
+  state.pair=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.deepEqual(visibility,[false,false]);
+  pet.destroy();
+});
+
+test('pairing with dialogue suppresses then restores the inherited widget', async () => {
+  const {pet,widget}=await setup();
+  localStorage.setItem('desktop-widget-visible:paired','false');
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};
+  state.dialogue={kind:'face-dialogue',id:3,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'你好。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'true');
+  state.dialogue=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(pet.widgetHeight,70);
+  pet.destroy();
+});
+
+test('pairing keeps the widget when only the partner has it enabled', async () => {
+  const {pet,widget}=await setup();
+  await pet.menuAction('widget-hide');
+  assert.equal(widget.hidden,true);
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(pet.widgetHeight,70);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'true');
+  pet.destroy();
+});
+
+test('pairing keeps the widget when only the owner has it enabled', async () => {
+  const {pet,widget}=await setup();
+  localStorage.setItem('desktop-widget-visible:pet-b','false');
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(pet.widgetWidth,184);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'true');
+  pet.destroy();
+});
+
+test('pairing leaves the widget closed when both single widgets are closed', async () => {
+  const {pet,widget}=await setup();
+  await pet.menuAction('widget-hide');
+  localStorage.setItem('desktop-widget-visible:pet-b','false');
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'false');
+  pet.destroy();
+});
+
+test('closing the paired widget during dialogue keeps it closed afterward', async () => {
+  const {pet,widget}=await setup();
+  state.pair={owner:'pet-a',mode:'face-dialogue',ownLeft:true,bedColor:'green'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  state.dialogue={kind:'face-dialogue',id:4,index:0,remainingSeconds:8,lines:[{speaker:'pet-a',text:'你好。'}]};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  await pet.menuAction('widget-hide');
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'false');
+  state.dialogue=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,true);
+  assert.equal(pet.widgetWidth,0);
+  assert.equal(pet.widgetHeight,0);
+  state.pair=null;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  state.pair={owner:'pet-a',mode:'kiss',ownLeft:false,bedColor:'blue'};state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(widget.hidden,false);
+  assert.equal(localStorage.getItem('desktop-widget-visible:paired'),'true');
+  pet.destroy();
+});
+
+test('shared work keeps Chen on the left while face dialogue follows ownLeft', async () => {
+  const {pet,bubble}=await setup();
+  const positions={};
+  for(const mode of ['shared-work','face-dialogue']) for(const ownLeft of [true,false]) for(const speaker of ['pet-a','pet-b']) {
+    state.pair={owner:'pet-a',mode,ownLeft,bedColor:'green'};
+    state.dialogue={kind:mode,id:100+state.revision,index:0,remainingSeconds:8,lines:[{speaker,text:'你好。'}]};state.revision++;
+    pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+    positions[`${mode}:${ownLeft}:${speaker}`]=Number.parseInt(bubble.style.left,10);
+  }
+  assert.equal(positions['shared-work:true:pet-a'],positions['shared-work:false:pet-a']);
+  assert.equal(positions['shared-work:true:pet-b'],positions['shared-work:false:pet-b']);
+  assert.equal(positions['shared-work:true:pet-b']-positions['shared-work:true:pet-a'],84);
+  assert.equal(positions['face-dialogue:true:pet-a'],positions['face-dialogue:false:pet-b']);
+  assert.equal(positions['face-dialogue:true:pet-b'],positions['face-dialogue:false:pet-a']);
+  assert.equal(positions['face-dialogue:true:pet-b']-positions['face-dialogue:true:pet-a'],84);
   pet.destroy();
 });
 test('Control-click opens menu but never begins dragging or toggles sleep', async () => {

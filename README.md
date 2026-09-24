@@ -40,6 +40,7 @@ Mac 版保留上述所有交互。桌宠在所在 Space 的普通窗口上方显
 - 自用安装包为 ad-hoc 签名 `.app` / `.dmg`，没有 Developer ID 签名或公证，不作为公开分发版本。
 - 安装：打开 DMG，将 Dual Pet 拖到 Applications，再从 Applications 启动。
 - 找回桌宠不拆开组合、不唤醒、不改变当前缩放；每次重新启动仍恢复默认大小与初始状态。
+- 亲亲和双人床的本地快速验证：见 [Mac GM 存档切换说明](docs/LOCAL_MAC_GM.md)。
 
 开发依赖：Node.js 24（包含测试所用的 Node 模块 hook）、npm、Rust stable/Cargo、Xcode Command Line Tools。使用现有 `mac-dev` 分支，不要重复创建旧交接文档提到的 `macos` 分支。
 

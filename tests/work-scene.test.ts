@@ -1,11 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sceneForPet, workBeats, workFrameAt } from '../src/work-scene.ts';
+import { paintWorkScene, sceneForPet, workBeats, workFrameAt } from '../src/work-scene.ts';
+import type { Sprite } from '../src/assets.ts';
 
 test('selects the matching solo and paired work scenes', () => {
   assert.equal(sceneForPet('pet-a', false), 'solo-chen');
   assert.equal(sceneForPet('pet-b', false), 'solo-jiang');
   assert.equal(sceneForPet('pet-a', true), 'dual-jiangchen');
+});
+
+test('solo work frames use one source anchor while paired work remains centered', () => {
+  const calls: number[][] = [];
+  const ctx = { imageSmoothingEnabled: true, drawImage: (...args: unknown[]) => calls.push(args.slice(5).map(Number)) } as unknown as CanvasRenderingContext2D;
+  const sprite = { image: {} as HTMLCanvasElement, x: 262, y: 48, width: 496, height: 432 } as Sprite;
+  for (const scene of ['solo-chen', 'solo-jiang'] as const) {
+    for (const width of [114, 180]) {
+      paintWorkScene(ctx, width, 100, scene, sprite);
+      const [left,,drawWidth] = calls.at(-1)!;
+      assert.ok(Math.abs(left + (512 - sprite.x) * (drawWidth / sprite.width) - width / 2) <= .5);
+    }
+  }
+  paintWorkScene(ctx, 208, 100, 'dual-jiangchen', sprite);
+  const [left,,drawWidth] = calls.at(-1)!;
+  assert.equal(left, (208 - drawWidth) / 2);
 });
 
 test('solo Chen loop returns to the idle mother frame', () => {

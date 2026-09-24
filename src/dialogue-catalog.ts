@@ -18,6 +18,10 @@ export interface CatalogueScene {
   verifiedOn: string;
 }
 
+export function collectionStatus(scene: Pick<CatalogueScene, 'trigger'>, unlocked: boolean): string {
+  return unlocked ? '已收集' : scene.trigger === 'solo-growth' ? '待陪伴' : '待相遇';
+}
+
 export const dialogueCatalogue: readonly CatalogueScene[] = [
   {
     id: 'face-dialogue',

@@ -1,4 +1,5 @@
-import type { Sprite, WorkFrame, WorkScene } from './assets';
+import { singleAttachmentAnchors, type Sprite, type WorkFrame, type WorkScene } from './assets.ts';
+import { anchoredDrawX } from './pet-ui-logic.ts';
 
 export type WorkBeat = { frame: WorkFrame; durationMs: number };
 
@@ -60,7 +61,10 @@ export function paintWorkScene(
 ) {
   const scale = Math.min(width / sprite.width, height / sprite.height);
   const drawWidth = sprite.width * scale, drawHeight = sprite.height * scale;
-  const left = (width - drawWidth) / 2, top = height - drawHeight;
+  const anchor = scene === 'solo-chen' ? singleAttachmentAnchors['pet-a'].working
+    : scene === 'solo-jiang' ? singleAttachmentAnchors['pet-b'].working : null;
+  const left = anchor === null ? (width - drawWidth) / 2 : anchoredDrawX(width, sprite.x, anchor, scale);
+  const top = height - drawHeight;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(sprite.image, sprite.x, sprite.y, sprite.width, sprite.height, left, top, drawWidth, drawHeight);
 }
