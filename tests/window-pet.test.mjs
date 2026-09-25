@@ -210,7 +210,7 @@ test('dialogue CSS uses fixed, proportional image layers and separate text areas
   assert.match(textLane,/width:188px; height:80px/);
   assert.match(textLane,/justify-content:center/);
   assert.match(textLane,/white-space:nowrap/);
-  assert.match(reminder,/left:35px; top:32px; width:170px/);
+  assert.match(reminder,/left:35px; top:27px; width:170px; height:44px/);
   assert.match(reminder,/text-align:center/);
   for(const name of ['dialogue-chen','dialogue-jiang','rest-reminder']) assert.match(css,new RegExp(`${name}\\.png`));
 });

@@ -39,7 +39,7 @@ canvas { display:block; width:100%; height:100%; pointer-events:none; image-rend
 .dialogue-bubble.jiang::before { background-image:url('/assets/ui/dialogue-jiang.png'); }
 .dialogue-bubble.reminder { color:#6b3f24; font-weight:700; animation:reminder-pulse 1.1s ease-in-out 9; }
 .dialogue-bubble.reminder::before { background-image:url('/assets/ui/rest-reminder.png'); }
-.dialogue-bubble.reminder > span { left:35px; top:32px; width:170px; height:44px; font-size:13px; line-height:1.25; text-align:center; }
+.dialogue-bubble.reminder > span { left:35px; top:27px; width:170px; height:44px; font-size:13px; line-height:1.25; text-align:center; }
 @keyframes reminder-pulse { 0%,100% { filter:brightness(1) drop-shadow(0 0 0 #d7a33c00); } 50% { filter:brightness(1.34) saturate(1.18) drop-shadow(0 0 9px #d7a33ccc); } }
 @media (prefers-reduced-motion:reduce) { .dialogue-bubble.reminder { animation:none; } .desktop-widget-close,.desktop-widget-toggle { transition:none; } }
 .pet-status { position:absolute; left:50%; transform:translateX(-50%); width:240px; padding:4px 7px; border:1px solid #c9a77d; border-radius:8px; background:#fff3e0; color:#833d28; font:10px/1.3 system-ui; overflow-wrap:anywhere; pointer-events:none; box-shadow:0 2px 4px #0002; }
