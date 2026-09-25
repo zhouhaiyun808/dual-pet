@@ -263,7 +263,8 @@ export class WindowPet {
       this.bubble.hidden = true; this.bubbleHeight = 0; this.bubbleWidth = 0; this.dialogueSpeaker = null;
       return;
     }
-    const text = line.speaker === 'system' ? line.text : `${petNames[line.speaker]}：${line.text}`;
+    const continuation = next.dialogue?.continuationIndices?.includes(next.dialogue.index) ?? false;
+    const text = line.speaker === 'system' || continuation ? line.text : `${petNames[line.speaker]}：${line.text}`;
     this.dialogueSpeaker = line.speaker;
     const bubbleClass = line.speaker === 'system' ? 'reminder' : line.speaker === 'pet-a' ? 'chen' : 'jiang';
     if (this.bubbleText.textContent !== text || this.bubble.hidden || !this.bubble.classList.contains(bubbleClass)) {

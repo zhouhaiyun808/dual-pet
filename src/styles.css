@@ -32,7 +32,7 @@ canvas { display:block; width:100%; height:100%; pointer-events:none; image-rend
 .desktop-widget-close:focus-visible, .desktop-widget-toggle:focus-visible { outline:2px solid #744831; outline-offset:1px; border-radius:3px; }
 .desktop-widget-toggle:disabled { cursor:default; filter:grayscale(.45) opacity(.55); }
 
-.dialogue-bubble { position:absolute; left:50%; transform:translateX(-50%); width:240px; height:108px; color:#353c35; font:13px/1.2 'Songti SC','STSong','SimSun',serif; overflow:hidden; pointer-events:none; box-shadow:none; }
+.dialogue-bubble { position:absolute; left:50%; transform:translateX(-50%); width:240px; height:108px; color:#353c35; font:14px/1.2 'Songti SC','STSong','SimSun',serif; overflow:hidden; pointer-events:none; box-shadow:none; }
 .dialogue-bubble::before { content:''; position:absolute; left:0; top:14px; width:240px; height:80px; background-position:center; background-size:240px 80px; background-repeat:no-repeat; }
 .dialogue-bubble > span { position:absolute; z-index:1; left:26px; top:14px; display:flex; align-items:center; justify-content:center; width:188px; height:80px; margin:0; white-space:nowrap; text-align:center; }
 .dialogue-bubble.chen::before { background-image:url('/assets/ui/dialogue-chen.png'); }

@@ -26,10 +26,11 @@ pub const KISS_THRESHOLD: f64 = 1000.0;
 pub const BED_THRESHOLD: f64 = 4000.0;
 const MAX_TICK_GAP: i64 = 5;
 const COOLDOWN: f64 = 60.0;
-// The fixed 188px text lane fits 14 full-width glyphs at 13px.
-// Reserve space for the speaker name and colon on every page.
-const MAX_DIALOGUE_CHARS_A: usize = 10;
-const MAX_DIALOGUE_CHARS_B: usize = 11;
+// The fixed 188px text lane fits 13 full-width glyphs at 14px.
+// Only the first page reserves room for the speaker name and colon.
+const MAX_DIALOGUE_CHARS_A: usize = 9;
+const MAX_DIALOGUE_CHARS_B: usize = 10;
+const MAX_DIALOGUE_CONTINUATION_CHARS: usize = 13;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PetId {
@@ -191,6 +192,8 @@ pub struct DialogueLine { pub speaker: Speaker, pub text: String }
 pub struct Dialogue {
     pub id: u64,
     pub lines: Vec<DialogueLine>,
+    #[serde(default)]
+    pub continuation_indices: Vec<usize>,
     pub index: usize,
     pub remaining_seconds: f64,
     pub kind: String,
@@ -992,11 +995,11 @@ impl Core {
         true
     }
     fn start_dialogue(&mut self, kind: &str, lines: Vec<DialogueLine>) {
-        let lines = split_dialogue_lines(lines);
+        let (lines, continuation_indices) = split_dialogue_lines(lines);
         if lines.is_empty() { return; }
         let remaining_seconds = dialogue_line_duration(kind, &lines[0].text);
         self.state.dialogue = Some(Dialogue { id: self.next_dialogue_id,
-            lines, index: 0, remaining_seconds, kind: kind.into() });
+            lines, continuation_indices, index: 0, remaining_seconds, kind: kind.into() });
         self.next_dialogue_id = self.next_dialogue_id.saturating_add(1);
     }
     fn break_reminder(&mut self) {
@@ -1123,17 +1126,21 @@ fn semantic_change(a: &AppSnapshot, b: &AppSnapshot) -> bool {
         })
 }
 
-pub fn line_duration(text: &str) -> f64 { (text.chars().count() as f64 / 6.0).clamp(3.0, 7.0) }
+pub fn line_duration(text: &str) -> f64 { (text.chars().count() as f64 / 6.0).clamp(2.2, 5.0) }
 fn dialogue_line_duration(kind: &str, text: &str) -> f64 {
     if kind == "break-reminder" { 10.0 } else { line_duration(text) }
 }
 
-fn split_dialogue_text(text: &str, limit: usize) -> Vec<String> {
+fn split_dialogue_text(text: &str, first_limit: usize, continuation_limit: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= limit { return vec![text.into()]; }
     let mut parts = Vec::new();
     let mut start = 0;
-    while chars.len() - start > limit {
+    loop {
+        let limit = if parts.is_empty() { first_limit } else { continuation_limit };
+        if chars.len() - start <= limit {
+            parts.push(chars[start..].iter().collect());
+            break;
+        }
         let end = start + limit;
         let window = &chars[start..end];
         let strong = window.iter().rposition(|c| matches!(c, '。' | '！' | '？' | '；' | '…'));
@@ -1143,16 +1150,22 @@ fn split_dialogue_text(text: &str, limit: usize) -> Vec<String> {
         parts.push(chars[start..split].iter().collect());
         start = split;
     }
-    if start < chars.len() { parts.push(chars[start..].iter().collect()); }
     parts
 }
 
-fn split_dialogue_lines(lines: Vec<DialogueLine>) -> Vec<DialogueLine> {
-    lines.into_iter().flat_map(|line| {
-        let limit = match line.speaker { Speaker::A => MAX_DIALOGUE_CHARS_A,
+fn split_dialogue_lines(lines: Vec<DialogueLine>) -> (Vec<DialogueLine>, Vec<usize>) {
+    let mut pages = Vec::new();
+    let mut continuation_indices = Vec::new();
+    for line in lines {
+        let first_limit = match line.speaker { Speaker::A => MAX_DIALOGUE_CHARS_A,
             Speaker::B => MAX_DIALOGUE_CHARS_B, Speaker::System => usize::MAX };
-        split_dialogue_text(&line.text, limit).into_iter().map(move |text| DialogueLine { speaker: line.speaker, text })
-    }).collect()
+        let continuation_limit = if line.speaker == Speaker::System { usize::MAX } else { MAX_DIALOGUE_CONTINUATION_CHARS };
+        for (page, text) in split_dialogue_text(&line.text, first_limit, continuation_limit).into_iter().enumerate() {
+            if page > 0 { continuation_indices.push(pages.len()); }
+            pages.push(DialogueLine { speaker: line.speaker, text });
+        }
+    }
+    (pages, continuation_indices)
 }
 
 /// Slot IDs cover one complete overnight interval, including its next-day tail.
@@ -1671,7 +1684,7 @@ mod tests {
     #[test]
     fn dialogue_cooldown_requires_sixty_seconds_and_reapproach() {
         let mut c = Core::new(clock()); activity(&mut c, PetId::B, Activity::Standing);
-        command(&mut c, action("join", Some(PetId::A))); seconds(&mut c, 6);
+        command(&mut c, action("join", Some(PetId::A))); seconds(&mut c, 5);
         command(&mut c, action("split", None)); seconds(&mut c, 59);
         command(&mut c, action("join", Some(PetId::A))); assert!(c.state.dialogue.is_none());
         seconds(&mut c, 1); assert!(c.state.dialogue.is_none());
@@ -1691,22 +1704,31 @@ mod tests {
             assert!(d.lines.iter().all(|line| catalogue.contains(&line.text)));
             assert!(d.lines.len() >= if kind == "face-dialogue" { 2 } else { 3 });
         }
-        assert_eq!(line_duration("短句"), 3.0); assert_eq!(line_duration(&"字".repeat(100)), 7.0);
+        assert_eq!(line_duration("短句"), 2.2); assert_eq!(line_duration(&"字".repeat(100)), 5.0);
     }
 
     #[test]
     fn long_dialogue_is_split_without_loss_and_keeps_the_speaker() {
         let text = "甲乙丙丁戊己庚辛壬癸，前半仍在继续。后半也要完整保留，而且不能漏字不能重字！最后收尾。";
-        let parts = split_dialogue_text(text, MAX_DIALOGUE_CHARS_B);
+        let parts = split_dialogue_text(text, MAX_DIALOGUE_CHARS_B, MAX_DIALOGUE_CONTINUATION_CHARS);
         assert!(parts.len() >= 2);
         assert_eq!(parts.concat(), text);
-        assert!(parts.iter().all(|part| part.chars().count() <= MAX_DIALOGUE_CHARS_B));
-        let lines = split_dialogue_lines(vec![DialogueLine { speaker: Speaker::B, text: text.into() }]);
+        assert!(parts[0].chars().count() <= MAX_DIALOGUE_CHARS_B);
+        assert!(parts[1..].iter().all(|part| part.chars().count() <= MAX_DIALOGUE_CONTINUATION_CHARS));
+        let (lines, continuations) = split_dialogue_lines(vec![DialogueLine { speaker: Speaker::B, text: text.into() }]);
         assert_eq!(lines.iter().map(|line| line.text.as_str()).collect::<String>(), text);
         assert!(lines.iter().all(|line| line.speaker == Speaker::B));
-        assert_eq!(split_dialogue_lines(vec![DialogueLine { speaker: Speaker::A,
-            text: "早备好了，就等江大侠点头。".into() }]).iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+        assert_eq!(continuations, (1..lines.len()).collect::<Vec<_>>());
+        let (example, example_continuations) = split_dialogue_lines(vec![DialogueLine { speaker: Speaker::A,
+            text: "早备好了，就等江大侠点头。".into() }]);
+        assert_eq!(example.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
             ["早备好了，", "就等江大侠点头。"]);
+        assert_eq!(example_continuations, [1]);
+        let (_, separate_continuations) = split_dialogue_lines(vec![
+            DialogueLine { speaker: Speaker::A, text: "早备好了，就等江大侠点头。".into() },
+            DialogueLine { speaker: Speaker::A, text: "走吧。".into() },
+        ]);
+        assert_eq!(separate_continuations, [1]);
     }
 
     #[test]
@@ -1732,10 +1754,11 @@ mod tests {
                 let d = c.state.dialogue.as_ref().unwrap();
                 assert_eq!(d.kind, kind);
                 assert!(d.lines.len() >= 2);
-                assert!(d.lines.iter().all(|line| line.text.chars().count() <= match line.speaker {
-                    Speaker::A => MAX_DIALOGUE_CHARS_A, Speaker::B => MAX_DIALOGUE_CHARS_B,
-                    Speaker::System => usize::MAX,
-                }));
+                assert!(d.lines.iter().enumerate().all(|(index, line)| line.text.chars().count() <=
+                    if d.continuation_indices.contains(&index) { MAX_DIALOGUE_CONTINUATION_CHARS } else {
+                        match line.speaker { Speaker::A => MAX_DIALOGUE_CHARS_A,
+                            Speaker::B => MAX_DIALOGUE_CHARS_B, Speaker::System => usize::MAX }
+                    }));
                 assert!(d.lines.iter().any(|line| line.speaker == Speaker::A));
                 assert!(d.lines.iter().any(|line| line.speaker == Speaker::B));
             }
@@ -1761,8 +1784,9 @@ mod tests {
                     let d = c.state.dialogue.as_ref().unwrap();
                     assert_eq!(d.kind, "solo-growth");
                     assert!(d.lines.iter().all(|line| line.speaker == if pet == PetId::A { Speaker::A } else { Speaker::B }));
-                    assert!(d.lines.iter().all(|line| line.text.chars().count() <= if pet == PetId::A {
-                        MAX_DIALOGUE_CHARS_A } else { MAX_DIALOGUE_CHARS_B }));
+                    assert!(d.lines.iter().enumerate().all(|(index, line)| line.text.chars().count() <=
+                        if d.continuation_indices.contains(&index) { MAX_DIALOGUE_CONTINUATION_CHARS }
+                        else if pet == PetId::A { MAX_DIALOGUE_CHARS_A } else { MAX_DIALOGUE_CHARS_B }));
                     assert!(catalogue.contains(&d.lines.iter().map(|line| line.text.as_str()).collect::<String>()));
                     assert!(catalogue.contains(&format!("id: '{}'", c.state.unlocked_dialogues.last().unwrap())));
                     assert!(!c.start_solo_dialogue(pet));

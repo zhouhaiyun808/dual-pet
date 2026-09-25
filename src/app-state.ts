@@ -23,7 +23,7 @@ export interface Pomodoro {
 }
 export interface PairRecord { owner: PetId; mode: PairMode; ownLeft: boolean; bedColor: 'green' | 'blue' }
 export interface DialogueLine { speaker: PetId | 'system'; text: string }
-export interface Dialogue { id: number; lines: DialogueLine[]; index: number; remainingSeconds: number; kind: string }
+export interface Dialogue { id: number; lines: DialogueLine[]; continuationIndices?: number[]; index: number; remainingSeconds: number; kind: string }
 export interface AppSnapshot {
   revision: number; pets: Record<PetId, PetRecord>; pair: PairRecord | null;
   bond: Bond; inputTotals: InputTotals; stage: number; settings: Settings; pomodoro: Pomodoro; dialogue: Dialogue | null;

@@ -181,13 +181,17 @@ test('dialogue uses the fixed measured bubble and system reminders omit a prefix
   pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
   assert.equal(pet.bubbleWidth,240);
   assert.equal(pet.bubbleHeight,108);
-  state.dialogue={kind:'shared-work',id:101,index:0,remainingSeconds:3,lines:[
-    {speaker:'pet-a',text:'早备好了，'},{speaker:'pet-a',text:'就等江大侠点头。'}]};state.revision++;
+  state.dialogue={kind:'shared-work',id:101,index:0,remainingSeconds:2.2,continuationIndices:[1],lines:[
+    {speaker:'pet-a',text:'早备好了，'},{speaker:'pet-a',text:'就等江大侠点头。'},
+    {speaker:'pet-a',text:'走吧。'}]};state.revision++;
   pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
   assert.equal(bubbleText.textContent,'陈子奚：早备好了，');
   state.dialogue.index=1;state.revision++;
   pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
-  assert.equal(bubbleText.textContent,'陈子奚：就等江大侠点头。');
+  assert.equal(bubbleText.textContent,'就等江大侠点头。');
+  state.dialogue.index=2;state.revision++;
+  pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+  assert.equal(bubbleText.textContent,'陈子奚：走吧。');
   pet.destroy();
 });
 
@@ -201,7 +205,7 @@ test('dialogue CSS uses fixed, proportional image layers and separate text areas
   assert.match(image,/width:240px; height:80px; background-position:center; background-size:240px 80px/);
   assert.equal(240/80,2172/724);
   assert.doesNotMatch(css,/border-image|background-size:100% 100%/);
-  assert.match(bubble,/font:13px/);
+  assert.match(bubble,/font:14px/);
   assert.match(textLane,/left:26px; top:14px/);
   assert.match(textLane,/width:188px; height:80px/);
   assert.match(textLane,/justify-content:center/);
