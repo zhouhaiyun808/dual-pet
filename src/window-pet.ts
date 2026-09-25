@@ -424,7 +424,10 @@ export class WindowPet {
       this.pet.style.setProperty('--pet-width', `${width}px`); this.pet.style.setProperty('--pet-size', `${height}px`);
       const bubbleOffset = this.paired && this.dialogueSpeaker !== null && this.dialogueSpeaker !== 'system' ? 42 : 0;
       const content = this.contentGeometry();
-      const measured = calculatePetLayout({ petWidth: width, petHeight: height, visibleTopInset: height - content.height, widgetWidth: this.widgetWidth, widgetHeight: this.widgetHeight, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, bubbleOffset, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
+      const visibleTopInset = height - (this.paired || this.sleeping || this.working ? content.height : this.size());
+      // Alpha bottoms measured on the 2172×724 source PNGs at a 240×80 CSS render.
+      const bubbleVisibleBottomInset = this.dialogueSpeaker === 'system' ? 29 : this.dialogueSpeaker ? 25 : 0;
+      const measured = calculatePetLayout({ petWidth: width, petHeight: height, visibleTopInset, widgetWidth: this.widgetWidth, widgetHeight: this.widgetHeight, bubbleWidth: this.bubbleWidth, bubbleHeight: this.bubbleHeight, bubbleVisibleBottomInset, bubbleOffset, statusWidth: this.statusWidth, statusHeight: this.statusHeight, gap: 8, padding: 16 });
       const { windowWidth, windowHeight, widgetTop, statusTop, bubbleTop, petTop: top } = measured;
       this.widget.style.top = `${widgetTop}px`;
       this.status.style.top = `${statusTop}px`;

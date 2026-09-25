@@ -200,21 +200,50 @@ test('dialogue CSS uses fixed, proportional image layers and separate text areas
   const bubble=css.match(/\.dialogue-bubble \{[^}]+\}/)?.[0]??'';
   const image=css.match(/\.dialogue-bubble::before \{[^}]+\}/)?.[0]??'';
   const textLane=css.match(/\.dialogue-bubble > span \{[^}]+\}/)?.[0]??'';
-  const chenText=css.match(/\.dialogue-bubble\.chen > span \{[^}]+\}/)?.[0]??'';
   const reminder=css.match(/\.dialogue-bubble\.reminder > span \{[^}]+\}/)?.[0]??'';
   assert.match(bubble,/width:240px; height:108px/);
   assert.match(image,/width:240px; height:80px; background-position:center; background-size:240px 80px/);
   assert.equal(240/80,2172/724);
   assert.doesNotMatch(css,/border-image|background-size:100% 100%/);
   assert.match(bubble,/font:14px/);
-  assert.match(textLane,/left:26px; top:14px/);
+  assert.match(textLane,/left:28px; top:12px/);
   assert.match(textLane,/width:188px; height:80px/);
   assert.match(textLane,/justify-content:center/);
   assert.match(textLane,/white-space:nowrap/);
-  assert.match(chenText,/top:12px/);
+  assert.doesNotMatch(css,/\.dialogue-bubble\.(?:chen|jiang) > span/);
   assert.match(reminder,/left:35px; top:27px; width:170px; height:44px/);
   assert.match(reminder,/text-align:center/);
   for(const name of ['dialogue-chen','dialogue-jiang','rest-reminder']) assert.match(css,new RegExp(`${name}\\.png`));
+});
+
+test('painted dialogue and reminder tails stay close to visible art in every activity', async () => {
+  const {pet,profile,bubble,petElement}=await setup();
+  const scenarios=[
+    ['solo standing',null,'standing'],
+    ['solo working',null,'working'],
+    ['solo sleeping',null,'sleeping'],
+    ['paired face','face-dialogue','standing'],
+    ['paired work','shared-work','standing'],
+    ['paired kiss','kiss','standing'],
+    ['double sleep','double-sleep','standing'],
+  ];
+  let id=200;
+  for(const scale of [.55,1,2]) for(const [label,mode,activity] of scenarios) for(const speaker of ['system','pet-a']) {
+    profile.scale=scale;
+    state.pets['pet-a'].activity=activity;
+    state.pair=mode?{owner:'pet-a',mode,ownLeft:true,bedColor:'green'}:null;
+    state.dialogue={kind:speaker==='system'?'break-reminder':'face-dialogue',id:id++,index:0,remainingSeconds:8,
+      lines:[{speaker,text:'测试台词'}]};
+    state.revision++;
+    pet.enqueueSnapshot(structuredClone(state));await pet.snapshotWork;
+    assert.equal(bubble.hidden,false,`${label} ${speaker} at ${scale}×`);
+    const paintedBottom=Number.parseFloat(bubble.style.top)+108-(speaker==='system'?29:25);
+    const envelopeHeight=pet.geometry().height;
+    const artHeight=pet.paired||pet.sleeping||pet.working?pet.contentGeometry().height:pet.size();
+    const visibleArtTop=Number.parseFloat(petElement.style.top)+envelopeHeight-artHeight;
+    assert.equal(visibleArtTop-paintedBottom,8,`${label} ${speaker} at ${scale}×`);
+  }
+  pet.destroy();
 });
 
 test('dialogue temporarily suppresses the widget and restores only persisted visibility', async () => {

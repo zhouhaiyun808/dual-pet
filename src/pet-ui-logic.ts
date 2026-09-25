@@ -33,6 +33,7 @@ export interface PetLayoutInput {
   widgetHeight: number;
   bubbleWidth: number;
   bubbleHeight: number;
+  bubbleVisibleBottomInset?: number;
   bubbleOffset: number;
   statusWidth: number;
   statusHeight: number;
@@ -76,7 +77,9 @@ export function calculatePetLayout(input: PetLayoutInput): PetLayout {
   // the current canvas' transparent top inset, attaching it to visible art.
   const widgetTop = baseWidgetTop + visibleTopInset;
   const statusTop = baseStatusTop + visibleTopInset;
-  const bubbleTop = baseBubbleTop + visibleTopInset;
+  // The dialogue PNG ends above its 108px layout box. Let its transparent
+  // lower pixels overlap the pet canvas so the painted tail keeps the gap.
+  const bubbleTop = baseBubbleTop + visibleTopInset + (input.bubbleHeight ? Math.max(0, input.bubbleVisibleBottomInset ?? 0) : 0);
   return {
     windowWidth: Math.max(input.petWidth + input.padding * 2, input.widgetWidth + input.padding, input.bubbleWidth + input.bubbleOffset * 2 + input.padding, input.statusWidth + input.padding),
     windowHeight: petTop + input.petHeight + input.padding,
