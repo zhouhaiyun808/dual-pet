@@ -200,6 +200,7 @@ test('dialogue CSS uses fixed, proportional image layers and separate text areas
   const bubble=css.match(/\.dialogue-bubble \{[^}]+\}/)?.[0]??'';
   const image=css.match(/\.dialogue-bubble::before \{[^}]+\}/)?.[0]??'';
   const textLane=css.match(/\.dialogue-bubble > span \{[^}]+\}/)?.[0]??'';
+  const chenText=css.match(/\.dialogue-bubble\.chen > span \{[^}]+\}/)?.[0]??'';
   const reminder=css.match(/\.dialogue-bubble\.reminder > span \{[^}]+\}/)?.[0]??'';
   assert.match(bubble,/width:240px; height:108px/);
   assert.match(image,/width:240px; height:80px; background-position:center; background-size:240px 80px/);
@@ -210,6 +211,7 @@ test('dialogue CSS uses fixed, proportional image layers and separate text areas
   assert.match(textLane,/width:188px; height:80px/);
   assert.match(textLane,/justify-content:center/);
   assert.match(textLane,/white-space:nowrap/);
+  assert.match(chenText,/top:12px/);
   assert.match(reminder,/left:35px; top:27px; width:170px; height:44px/);
   assert.match(reminder,/text-align:center/);
   for(const name of ['dialogue-chen','dialogue-jiang','rest-reminder']) assert.match(css,new RegExp(`${name}\\.png`));
