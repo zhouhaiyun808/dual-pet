@@ -76,21 +76,6 @@ Mac 打包自动使用 Tauri CI 模式，避免 Finder 自动化权限；DMG 保
 
 `index.html`、`src/` 和构建后的 `dist/` 是桌面应用的内嵌界面。`dist/` 属于生成文件，不提交到 Git。Mac 原生代码由条件编译隔离，跨平台共用 TypeScript 渲染和状态交互。
 
-## 跨电脑继续开发
-
-1. 在新电脑登录同一个 GitHub 账号和 OpenAI 账号。
-2. clone 私有仓库并进入项目：
-
-   ```powershell
-   git clone <dual-pet-private-repository-url>
-   cd dual-pet
-   ```
-
-3. 依次阅读 `README.md`、`PROJECT_CONTEXT.md`、`ROADMAP.md`、`CHANGELOG.md` 和 `AGENT_HANDOFF.md`。
-4. 执行 `npm install` 和 `npm run build`。
-5. 每次开发前运行 `git pull --ff-only`；完成一组可用改动后提交并推送。
-
-如果另一台电脑已有带本地改动的项目，不要直接覆盖。先保存到临时分支，再与 `main` 比较和合并。
 
 ## 分支约定
 
